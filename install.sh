@@ -55,8 +55,13 @@ git clone -q --branch "$REF" --depth 1 "$FORK" "$SRC/sing-box-fork" \
 # opening /dev/tty fails, and under dash a failed redirection in the current
 # shell is fatal — which used to kill this script silently, with no output at
 # all, in the one situation it most needed to explain itself.
+#
+# bash, not sh: this launcher is POSIX because it is piped into whatever /bin/sh
+# is, but the installer it hands over to is bash — on Debian /bin/sh is dash,
+# which fails on the first line with "Illegal option -o pipefail".
+command -v bash >/dev/null 2>&1 || die "bash is required"
 set -- --src "$SRC/skysbx-node" --fork "$SRC/sing-box-fork" "$@"
 if ( exec 3>/dev/tty ) 2>/dev/null; then
-    exec sh "$SRC/skysbx-node/deploy/install-node.sh" "$@" </dev/tty
+    exec bash "$SRC/skysbx-node/deploy/install-node.sh" "$@" </dev/tty
 fi
-exec sh "$SRC/skysbx-node/deploy/install-node.sh" "$@"
+exec bash "$SRC/skysbx-node/deploy/install-node.sh" "$@"
