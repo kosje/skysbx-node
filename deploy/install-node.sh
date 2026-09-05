@@ -119,10 +119,19 @@ mkdir -p "$BUILD"
 fetch() { # fetch <repo> <dest>
     local repo=$1 dest=$2
     local url="https://github.com/${GH_OWNER}/${repo}.git"
-    [ -n "$GH_TOKEN" ] && url="https://${GH_TOKEN}@github.com/${GH_OWNER}/${repo}.git"
     rm -rf "$dest"
-    git clone -q --branch "$REF" --depth 1 "$url" "$dest" \
-        || die "cannot clone ${GH_OWNER}/${repo} (a private repo needs GITHUB_TOKEN)"
+    # The token goes in a per-command header, not in the URL: git writes the
+    # remote URL into the clone's .git/config, and a token in it would sit on
+    # disk for as long as the build directory does.
+    if [ -n "$GH_TOKEN" ]; then
+        git -c "http.extraHeader=Authorization: Basic $(printf 'x-access-token:%s' \
+            "$GH_TOKEN" | base64 -w0)" \
+            clone -q --branch "$REF" --depth 1 "$url" "$dest" \
+            || die "cannot clone ${GH_OWNER}/${repo} (check GITHUB_TOKEN)"
+    else
+        git clone -q --branch "$REF" --depth 1 "$url" "$dest" \
+            || die "cannot clone ${GH_OWNER}/${repo} (a private repo needs GITHUB_TOKEN)"
+    fi
     ok "${repo}@$(git -C "$dest" rev-parse --short HEAD)"
 }
 
