@@ -185,4 +185,4 @@ require (
 // The hot-swap patches live in a fork; sing-box upstream builds an inbound's
 // user set once and never exposes a way to change it. Point this at a published
 // module before release.
-replace github.com/sagernet/sing-box => ../remnawave/sing-box-fork
+replace github.com/sagernet/sing-box => ../sing-box-fork
