@@ -43,6 +43,12 @@ GOTOOLCHAIN=go1.26.5 CGO_ENABLED=0 go build -trimpath \
 
 `go.mod` 里的 `replace` 指向带热插拔补丁的 sing-box fork，发布前需换成已发布模块。
 
+测试同样要带 tags —— `internal/engine` 的测试会真的起 sing-box：
+
+```bash
+go test -tags 'with_clash_api,with_v2ray_api,with_utls,with_acme,with_quic' ./...
+```
+
 ## 由节点决定、而非面板决定的事
 
 两处刻意不让面板管，因为它们是「怎么跑 sing-box」的细节：

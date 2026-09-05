@@ -84,6 +84,44 @@ func (e *Engine) ApplyConfig(ctx context.Context, raw json.RawMessage) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	previous := e.current
+	applyErr := e.swapLocked(options, raw)
+	if applyErr == nil {
+		return nil
+	}
+
+	// Building the new instance happens before the old one is stopped, so a
+	// failure there costs nothing and e.running is still true. A failure to
+	// *start* it costs everything: by then the old instance is gone, and one
+	// mistyped port would take every inbound on this node offline until some
+	// unrelated edit happened to push a new configuration.
+	if previous == nil || e.running {
+		return applyErr
+	}
+
+	prevOptions, err := parseOptions(ctx, previous)
+	if err != nil {
+		e.log.Error("cannot restore the previous configuration; this node is "+
+			"serving nothing", "apply_error", applyErr, "parse_error", err)
+		return applyErr
+	}
+	if err := e.swapLocked(prevOptions, previous); err != nil {
+		e.log.Error("restoring the previous configuration failed; this node is "+
+			"serving nothing", "apply_error", applyErr, "restore_error", err)
+		return applyErr
+	}
+	// The panel re-sends users after every configuration push, so the restored
+	// instance gets its user set back without asking for it.
+	e.log.Warn("configuration rejected; the previous one is running again",
+		"error", applyErr)
+	return applyErr
+}
+
+// swapLocked builds an instance and, only once it exists, stops the running one
+// and starts the new. On any error the engine is left in a truthful state:
+// still running the old instance if the failure came before the swap, stopped
+// if it came after. e.mu must be held.
+func (e *Engine) swapLocked(options option.Options, raw json.RawMessage) error {
 	// include.Context carries the protocol registries. They are needed both to
 	// decode a configuration and to build the instance — sing-box looks them up
 	// again when constructing inbounds, and without them refuses with "missing
@@ -100,8 +138,6 @@ func (e *Engine) ApplyConfig(ctx context.Context, raw json.RawMessage) error {
 		return fmt.Errorf("build sing-box instance: %w", err)
 	}
 
-	// The old instance is stopped only once the new one is built, so a
-	// construction failure costs nothing.
 	e.stopLocked()
 
 	if err := instance.Start(); err != nil {
