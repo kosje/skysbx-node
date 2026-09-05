@@ -43,11 +43,11 @@ func (e *fakeEngine) State() proto.StateData {
 	return e.state
 }
 
-func (e *fakeEngine) EnforceIPLimits(context.Context) (map[string]int, error) {
+func (e *fakeEngine) EnforceIPLimits(context.Context) (map[string]int, map[string]proto.Activity, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.enforceCount++
-	return e.ipCounts, nil
+	return e.ipCounts, nil, nil
 }
 
 func (e *fakeEngine) ApplyConfig(_ context.Context, cfg json.RawMessage) error {

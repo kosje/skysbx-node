@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kosje/skysbx-node/internal/proto"
 )
 
 // A shared subscription is worth nothing to the person paying for it if fifty
@@ -63,7 +65,12 @@ func (l *limiter) setLimits(limits map[string]int) {
 type conn struct {
 	ID   string
 	User string
-	IP   string
+	IP   string // source
+
+	// Where it is going. Used only to count — see proto.Activity for why the
+	// destination itself is not kept.
+	DestIP   string
+	DestPort string
 }
 
 // enforce decides which connections to close, and returns the number of
@@ -193,8 +200,11 @@ func (e *Engine) connections(ctx context.Context) ([]conn, error) {
 		Connections []struct {
 			ID       string `json:"id"`
 			Metadata struct {
-				User     string `json:"user"`
-				SourceIP string `json:"sourceIP"`
+				User            string `json:"user"`
+				SourceIP        string `json:"sourceIP"`
+				DestinationIP   string `json:"destinationIP"`
+				DestinationPort string `json:"destinationPort"`
+				Host            string `json:"host"`
 			} `json:"metadata"`
 		} `json:"connections"`
 	}
@@ -204,13 +214,57 @@ func (e *Engine) connections(ctx context.Context) ([]conn, error) {
 
 	out := make([]conn, 0, len(body.Connections))
 	for _, c := range body.Connections {
+		dest := strings.TrimSpace(c.Metadata.DestinationIP)
+		if dest == "" {
+			// A connection to a name that has not been resolved yet still has a
+			// distinct destination; the host stands in for it so the peer count
+			// is not silently short.
+			dest = strings.TrimSpace(c.Metadata.Host)
+		}
 		out = append(out, conn{
-			ID:   c.ID,
-			User: strings.TrimSpace(c.Metadata.User),
-			IP:   strings.TrimSpace(c.Metadata.SourceIP),
+			ID:       c.ID,
+			User:     strings.TrimSpace(c.Metadata.User),
+			IP:       strings.TrimSpace(c.Metadata.SourceIP),
+			DestIP:   dest,
+			DestPort: strings.TrimSpace(c.Metadata.DestinationPort),
 		})
 	}
 	return out, nil
+}
+
+// activity summarises what each user is doing, from one sample of the live
+// connections. Counts only; see proto.Activity.
+func activity(conns []conn) map[string]proto.Activity {
+	type sets struct {
+		peers, ports map[string]bool
+		conns        int
+	}
+	byUser := map[string]*sets{}
+	for _, c := range conns {
+		if c.User == "" {
+			continue
+		}
+		s := byUser[c.User]
+		if s == nil {
+			s = &sets{peers: map[string]bool{}, ports: map[string]bool{}}
+			byUser[c.User] = s
+		}
+		s.conns++
+		if c.DestIP != "" {
+			s.peers[c.DestIP] = true
+		}
+		if c.DestPort != "" {
+			s.ports[c.DestPort] = true
+		}
+	}
+
+	out := make(map[string]proto.Activity, len(byUser))
+	for user, s := range byUser {
+		out[user] = proto.Activity{
+			Conns: s.conns, Peers: len(s.peers), Ports: len(s.ports),
+		}
+	}
+	return out
 }
 
 func (e *Engine) closeConnection(ctx context.Context, id string) error {
@@ -239,11 +293,15 @@ func (e *Engine) closeConnection(ctx context.Context, id string) error {
 // Called on a timer rather than per connection: sing-box has no hook that fires
 // as one is accepted, and polling a few seconds apart is enough to make a
 // shared subscription useless without spending anything per connection.
-func (e *Engine) EnforceIPLimits(ctx context.Context) (map[string]int, error) {
+func (e *Engine) EnforceIPLimits(ctx context.Context) (map[string]int, map[string]proto.Activity, error) {
 	conns, err := e.connections(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	// Sampled before anything is closed: what the panel is shown is what the
+	// user was doing, not what was left of it afterwards.
+	acts := activity(conns)
+
 	toClose, counts := e.limits.enforce(conns, time.Now())
 	for _, id := range toClose {
 		if err := e.closeConnection(ctx, id); err != nil {
@@ -253,5 +311,5 @@ func (e *Engine) EnforceIPLimits(ctx context.Context) (map[string]int, error) {
 	if len(toClose) > 0 {
 		e.log.Info("closed connections over the address limit", "connections", len(toClose))
 	}
-	return counts, nil
+	return counts, acts, nil
 }

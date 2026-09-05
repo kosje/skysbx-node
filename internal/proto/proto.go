@@ -139,6 +139,29 @@ type OnlineData struct {
 	// has connected. The panel shows it next to the limit, so that "3 / 2"
 	// says both that a limit is being enforced and that someone is testing it.
 	IPs map[string]int `json:"ips,omitempty"`
+
+	// Activity is the shape of what each user is doing, for the panel to keep
+	// and show. Counts only — no destinations.
+	Activity map[string]Activity `json:"activity,omitempty"`
+}
+
+// Activity describes how an account is being used, without describing what it
+// is being used for.
+//
+// Shape rather than destinations, deliberately. What distinguishes BitTorrent,
+// a bulk download and a running speed test from ordinary browsing is the shape:
+// how many connections at once, to how many different peers, across how many
+// ports. Recording where someone browses would answer a question nobody asked
+// and build a history that did not exist before.
+// There is no "this was BitTorrent" counter, and not for want of trying: the
+// clash API exposes the inbound type, not the sniffed protocol, and a
+// connection the BitTorrent rule rejected is closed before any sample could
+// see it. The shape is the signal, and it is the better one anyway — it does
+// not care whether the payload was encrypted.
+type Activity struct {
+	Conns int `json:"conns"` // connections open at the moment of the sample
+	Peers int `json:"peers"` // distinct destination addresses
+	Ports int `json:"ports"` // distinct destination ports
 }
 
 // Encode builds a frame.

@@ -77,7 +77,7 @@ type Engine interface {
 	// EnforceIPLimits closes connections from source addresses over a user's
 	// cap and returns how many distinct addresses each user has left. It runs
 	// here rather than in the panel because this is where the connections are.
-	EnforceIPLimits(ctx context.Context) (map[string]int, error)
+	EnforceIPLimits(ctx context.Context) (map[string]int, map[string]proto.Activity, error)
 
 	// State is what the node is serving right now, reported after every
 	// attempt to apply a configuration so the panel can tell an inbound that
@@ -110,19 +110,29 @@ type Client struct {
 	// the online users rather than measured again there, so the two cannot
 	// disagree about who is connected.
 	ipCounts map[string]int
+	// Last per-user activity sample, from the same tick. Counts only; see
+	// proto.Activity for why no destination is kept.
+	activity map[string]proto.Activity
 }
 
-func (c *Client) lastIPCounts() map[string]int {
+func (c *Client) lastSample() (map[string]int, map[string]proto.Activity) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.ipCounts) == 0 {
-		return nil
+	var counts map[string]int
+	if len(c.ipCounts) > 0 {
+		counts = make(map[string]int, len(c.ipCounts))
+		for k, v := range c.ipCounts {
+			counts[k] = v
+		}
 	}
-	out := make(map[string]int, len(c.ipCounts))
-	for k, v := range c.ipCounts {
-		out[k] = v
+	var acts map[string]proto.Activity
+	if len(c.activity) > 0 {
+		acts = make(map[string]proto.Activity, len(c.activity))
+		for k, v := range c.activity {
+			acts[k] = v
+		}
 	}
-	return out
+	return counts, acts
 }
 
 func New(cfg Config) (*Client, error) {
@@ -338,8 +348,9 @@ func (c *Client) report(ctx context.Context) {
 				c.log.Debug("read online users", "error", err)
 				continue
 			}
+			counts, acts := c.lastSample()
 			if err := c.send(ctx, proto.TypeOnline, 0,
-				proto.OnlineData{Users: names, IPs: c.lastIPCounts()}); err != nil {
+				proto.OnlineData{Users: names, IPs: counts, Activity: acts}); err != nil {
 				return
 			}
 
@@ -347,13 +358,13 @@ func (c *Client) report(ctx context.Context) {
 			// Far more often than the reports: this is the thing standing
 			// between one subscription and fifty strangers, and every tick it
 			// is late is a tick they are online.
-			counts, err := c.cfg.Engine.EnforceIPLimits(ctx)
+			counts, acts, err := c.cfg.Engine.EnforceIPLimits(ctx)
 			if err != nil {
 				c.log.Debug("enforce address limits", "error", err)
 				continue
 			}
 			c.mu.Lock()
-			c.ipCounts = counts
+			c.ipCounts, c.activity = counts, acts
 			c.mu.Unlock()
 		}
 	}

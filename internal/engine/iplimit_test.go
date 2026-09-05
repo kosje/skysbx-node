@@ -171,3 +171,36 @@ func TestUnattributableConnectionsAreIgnored(t *testing.T) {
 		t.Error("a connection with no user was counted against a nameless account")
 	}
 }
+
+// The activity sample is what the panel shows to answer "is this account being
+// used for something other than browsing". Counts, and only counts: where
+// someone goes is not the question and not this program's business to record.
+func TestActivityCountsShapeNotDestinations(t *testing.T) {
+	got := activity([]conn{
+		// One user, many peers on many ports — the shape of a swarm.
+		{User: "alice", DestIP: "1.1.1.1", DestPort: "51413"},
+		{User: "alice", DestIP: "2.2.2.2", DestPort: "6881"},
+		{User: "alice", DestIP: "3.3.3.3", DestPort: "6881"},
+		// Another user browsing: one peer, one port, repeatedly.
+		{User: "bob", DestIP: "9.9.9.9", DestPort: "443"},
+		{User: "bob", DestIP: "9.9.9.9", DestPort: "443"},
+		// Unattributable, and a destination not yet resolved.
+		{User: "", DestIP: "4.4.4.4", DestPort: "80"},
+		{User: "carol", DestIP: "", DestPort: "443"},
+	})
+
+	if a := got["alice"]; a.Conns != 3 || a.Peers != 3 || a.Ports != 2 {
+		t.Errorf("alice = %+v, want 3 conns / 3 peers / 2 ports", a)
+	}
+	if b := got["bob"]; b.Conns != 2 || b.Peers != 1 || b.Ports != 1 {
+		t.Errorf("bob = %+v, want 2 conns / 1 peer / 1 port", b)
+	}
+	if _, ok := got[""]; ok {
+		t.Error("a connection with no user was attributed to a nameless account")
+	}
+	// A destination that has not resolved yet still counts as a connection, but
+	// must not inflate the peer count with an empty string.
+	if c := got["carol"]; c.Conns != 1 || c.Peers != 0 {
+		t.Errorf("carol = %+v, want 1 conn / 0 peers", c)
+	}
+}
