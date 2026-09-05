@@ -11,6 +11,27 @@ skysbx 的数据面：内嵌 sing-box，由 [`skysbx-panel`](https://github.com/
 
 面板是**独立的程序**，不链接这里的任何代码，许可单独适用。
 
+## 安装
+
+先在面板里 **Nodes → 新增**，复制那个只显示一次的接入 token，然后在这台服务器上：
+
+```bash
+sudo sh -c "$(wget -qO- https://raw.githubusercontent.com/kosje/skysbx-node/main/install.sh)"
+```
+
+它会问面板地址和 token。非交互：
+
+```bash
+sudo sh -c "$(wget -qO- https://raw.githubusercontent.com/kosje/skysbx-node/main/install.sh)" \
+  -- --panel https://panel.example.com --token <token>
+```
+
+`--domain` 是可选的：只有 AnyTLS 需要证书，Reality 用自己的密钥对认证、Shadowsocks
+没有 TLS 层，所以没证书的节点照样服务另外两个协议。给了域名脚本就用 certbot 签
+（`--cf-token` 可走 DNS-01）。
+
+> 节点域名必须是 **DNS-only（灰云）**。三个协议都不是 HTTP，套 CDN 会全部失效。
+
 ## 它做什么
 
 启动后主动连面板，然后：
