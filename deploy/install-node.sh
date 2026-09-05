@@ -116,8 +116,16 @@ if [ "$ACTION" = uninstall ] || [ "$ACTION" = purge ]; then
     if [ "$ACTION" = purge ]; then
         say "purging"
         # Read the domain back before deleting the hook that names it.
-        PURGE_DOMAIN=$(sed -n 's|^LIVE=/etc/letsencrypt/live/||p' \
-            "$ROOT/certbot-deploy.sh" 2>/dev/null | head -1)
+        #
+        # Guarded, because there may be no hook: with pipefail a failing sed
+        # makes the whole pipeline fail, a failing pipeline makes the
+        # assignment fail, and set -e then ends the script — silently, halfway
+        # through a purge, having removed the service but nothing else.
+        PURGE_DOMAIN=""
+        if [ -f "$ROOT/certbot-deploy.sh" ]; then
+            PURGE_DOMAIN=$( (sed -n 's|^LIVE=/etc/letsencrypt/live/||p' \
+                "$ROOT/certbot-deploy.sh" || true) | head -1)
+        fi
         rm -f "$ROOT/node.env" "$ROOT/cert.pem" "$ROOT/key.pem" "$ROOT/certbot-deploy.sh"
         if [ -n "$PURGE_DOMAIN" ] && command -v certbot >/dev/null 2>&1; then
             certbot delete --cert-name "$PURGE_DOMAIN" --non-interactive >/dev/null 2>&1 \
@@ -149,7 +157,7 @@ if [ "$ACTION" = uninstall ] || [ "$ACTION" = purge ]; then
         ok "$ROOT removed"
     else
         warn "$ROOT kept — it still holds files (the panel's, or your own):"
-        ls -A "$ROOT" 2>/dev/null | sed 's/^/       /'
+        (ls -A "$ROOT" 2>/dev/null || true) | sed 's/^/       /'
     fi
 
     printf '\n%sskysbx node removed.%s\n' "$GRN" "$RST"
@@ -204,7 +212,7 @@ done
 
 if [ -n "$DOMAIN" ]; then
     PUBLIC_IP=$(curl -fsS --max-time 10 https://api.ipify.org || echo "")
-    RESOLVED=$(dig +short "$DOMAIN" A @1.1.1.1 | tail -1)
+    RESOLVED=$( (dig +short "$DOMAIN" A @1.1.1.1 || true) | tail -1)
     if [ -z "$RESOLVED" ]; then
         warn "$DOMAIN has no A record; AnyTLS will not get a certificate"
     elif [ -n "$PUBLIC_IP" ] && [ "$RESOLVED" != "$PUBLIC_IP" ]; then
