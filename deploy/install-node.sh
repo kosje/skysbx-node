@@ -179,14 +179,18 @@ ask() { # ask <var> <prompt>
     [ -n "${!__var}" ] || die "$__prompt is required"
 }
 
-say "node configuration"
-ask PANEL "Panel URL (https://panel.example.com)"
-ask TOKEN "Join token"
-if [ -z "$DOMAIN" ] && [ -t 0 ]; then
-    printf "  This node's domain (blank to skip AnyTLS): "
-    read -r DOMAIN
+# An upgrade already knows all of this: it read the panel URL and token out of
+# node.env, and the certificate is certbot's business, not this run's.
+if [ "$ACTION" != upgrade ]; then
+    say "node configuration"
+    ask PANEL "Panel URL (https://panel.example.com)"
+    ask TOKEN "Join token"
+    if [ -z "$DOMAIN" ] && [ -t 0 ]; then
+        printf "  This node's domain (blank to skip AnyTLS): "
+        read -r DOMAIN
+    fi
+    [ -n "$DOMAIN" ] && [ -z "$EMAIL" ] && EMAIL="admin@$DOMAIN"
 fi
-[ -n "$DOMAIN" ] && [ -z "$EMAIL" ] && EMAIL="admin@$DOMAIN"
 
 # ─────────────────────────────── preflight ────────────────────────────────
 
