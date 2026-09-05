@@ -32,12 +32,22 @@ type fakeEngine struct {
 	ackCount  int
 	online    []string
 	state     proto.StateData
+
+	ipCounts     map[string]int
+	enforceCount int
 }
 
 func (e *fakeEngine) State() proto.StateData {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.state
+}
+
+func (e *fakeEngine) EnforceIPLimits(context.Context) (map[string]int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.enforceCount++
+	return e.ipCounts, nil
 }
 
 func (e *fakeEngine) ApplyConfig(_ context.Context, cfg json.RawMessage) error {

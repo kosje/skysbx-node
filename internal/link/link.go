@@ -31,6 +31,10 @@ import (
 var (
 	statsEvery  = 30 * time.Second
 	onlineEvery = 30 * time.Second
+	// Address limits are checked far more often than anything is reported: this
+	// is what stands between one subscription and fifty strangers, and every
+	// second it is late is a second they are online.
+	limitEvery = 5 * time.Second
 )
 
 const (
@@ -70,6 +74,11 @@ type Engine interface {
 	// Online lists users with at least one live connection.
 	Online() ([]string, error)
 
+	// EnforceIPLimits closes connections from source addresses over a user's
+	// cap and returns how many distinct addresses each user has left. It runs
+	// here rather than in the panel because this is where the connections are.
+	EnforceIPLimits(ctx context.Context) (map[string]int, error)
+
 	// State is what the node is serving right now, reported after every
 	// attempt to apply a configuration so the panel can tell an inbound that
 	// took effect from one that was rejected.
@@ -97,6 +106,23 @@ type Client struct {
 
 	mu sync.Mutex
 	ws *websocket.Conn
+	// Last per-user address counts, from the enforcement tick. Reported with
+	// the online users rather than measured again there, so the two cannot
+	// disagree about who is connected.
+	ipCounts map[string]int
+}
+
+func (c *Client) lastIPCounts() map[string]int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.ipCounts) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(c.ipCounts))
+	for k, v := range c.ipCounts {
+		out[k] = v
+	}
+	return out
 }
 
 func New(cfg Config) (*Client, error) {
@@ -278,8 +304,10 @@ func (c *Client) reply(ctx context.Context, id uint64, err error) {
 func (c *Client) report(ctx context.Context) {
 	statsTick := time.NewTicker(statsEvery)
 	onlineTick := time.NewTicker(onlineEvery)
+	limitTick := time.NewTicker(limitEvery)
 	defer statsTick.Stop()
 	defer onlineTick.Stop()
+	defer limitTick.Stop()
 
 	for {
 		select {
@@ -311,9 +339,22 @@ func (c *Client) report(ctx context.Context) {
 				continue
 			}
 			if err := c.send(ctx, proto.TypeOnline, 0,
-				proto.OnlineData{Users: names}); err != nil {
+				proto.OnlineData{Users: names, IPs: c.lastIPCounts()}); err != nil {
 				return
 			}
+
+		case <-limitTick.C:
+			// Far more often than the reports: this is the thing standing
+			// between one subscription and fifty strangers, and every tick it
+			// is late is a tick they are online.
+			counts, err := c.cfg.Engine.EnforceIPLimits(ctx)
+			if err != nil {
+				c.log.Debug("enforce address limits", "error", err)
+				continue
+			}
+			c.mu.Lock()
+			c.ipCounts = counts
+			c.mu.Unlock()
 		}
 	}
 }

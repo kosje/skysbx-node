@@ -89,6 +89,14 @@ type UsersData struct {
 	// for a name outside it — so a user hot-added without refreshing this
 	// relays traffic that is billed to nobody, silently.
 	StatsUsers []string `json:"stats_users"`
+
+	// IPLimits is how many distinct source addresses each user may have
+	// connected at once, by name. Absent or zero means no limit.
+	//
+	// Enforced here rather than in the panel because this is where the
+	// connections are: the panel hears about them up to thirty seconds late,
+	// and could only respond by revoking the whole account.
+	IPLimits map[string]int `json:"ip_limits,omitempty"`
 }
 
 // User carries whichever credential its protocol authenticates with.
@@ -126,6 +134,11 @@ type SystemStats struct {
 // OnlineData lists users with at least one live connection.
 type OnlineData struct {
 	Users []string `json:"users"`
+
+	// IPs is how many distinct source addresses each of those users currently
+	// has connected. The panel shows it next to the limit, so that "3 / 2"
+	// says both that a limit is being enforced and that someone is testing it.
+	IPs map[string]int `json:"ips,omitempty"`
 }
 
 // Encode builds a frame.

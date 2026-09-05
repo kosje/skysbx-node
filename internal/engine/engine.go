@@ -51,13 +51,17 @@ type Engine struct {
 	apis localAPIs
 
 	counters *counters
+
+	// Per-user cap on distinct source addresses. Its own lock: it is read and
+	// written on a timer that must not wait behind a configuration swap.
+	limits *limiter
 }
 
 func New(log *slog.Logger) *Engine {
 	if log == nil {
 		log = slog.Default()
 	}
-	e := &Engine{log: log, counters: newCounters()}
+	e := &Engine{log: log, counters: newCounters(), limits: newLimiter()}
 	apis, err := newLocalAPIs()
 	if err != nil {
 		// Only reachable if loopback itself is unusable, in which case nothing
@@ -257,6 +261,16 @@ func (e *Engine) UpdateUsers(_ context.Context, data proto.UsersData) error {
 	if err := e.syncStatsUsersLocked(data.StatsUsers); err != nil {
 		return err
 	}
+
+	// The address limits arrive with the users they apply to, because that is
+	// the message that changes when a user is added, edited or removed —
+	// carrying them separately would let the two drift.
+	e.limits.setLimits(data.IPLimits)
+	known := make(map[string]bool, len(data.StatsUsers))
+	for _, name := range data.StatsUsers {
+		known[name] = true
+	}
+	e.limits.forget(known)
 	return nil
 }
 
