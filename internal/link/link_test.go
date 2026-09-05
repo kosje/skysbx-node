@@ -31,6 +31,13 @@ type fakeEngine struct {
 	readCount int
 	ackCount  int
 	online    []string
+	state     proto.StateData
+}
+
+func (e *fakeEngine) State() proto.StateData {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.state
 }
 
 func (e *fakeEngine) ApplyConfig(_ context.Context, cfg json.RawMessage) error {

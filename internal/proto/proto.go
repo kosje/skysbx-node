@@ -22,6 +22,7 @@ const (
 	TypeError  = "error"
 	TypeStats  = "stats"
 	TypeOnline = "online"
+	TypeState  = "state"
 	TypePong   = "pong"
 
 	// panel -> node
@@ -51,6 +52,23 @@ type Hello struct {
 // never adopted, and the discrepancy surfaces only as users unable to connect.
 type ErrorData struct {
 	Message string `json:"msg"`
+}
+
+// StateData is what the node is actually serving, sent after every attempt to
+// apply a configuration.
+//
+// The error reply to a config command says the node refused it; this says what
+// it is running instead. The panel needs both: an operator who mistypes a port
+// sees the inbound listed and enabled in the panel while the node quietly runs
+// the previous configuration, and nothing short of the node's own account of
+// its live inbounds makes that visible.
+//
+// Inbounds is authoritative rather than derived. Parsing the tag back out of an
+// error message would be a guess, and would be wrong the moment sing-box
+// rewords it.
+type StateData struct {
+	Inbounds []string `json:"inbounds"`
+	Error    string   `json:"error,omitempty"`
 }
 
 // ConfigData carries a full sing-box configuration. Inbound user lists are

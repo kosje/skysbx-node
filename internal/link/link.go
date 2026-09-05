@@ -70,6 +70,11 @@ type Engine interface {
 	// Online lists users with at least one live connection.
 	Online() ([]string, error)
 
+	// State is what the node is serving right now, reported after every
+	// attempt to apply a configuration so the panel can tell an inbound that
+	// took effect from one that was rejected.
+	State() proto.StateData
+
 	// SingboxVersion is reported in the hello.
 	SingboxVersion() string
 }
@@ -231,6 +236,10 @@ func (c *Client) handle(ctx context.Context, data []byte) {
 			c.log.Info("configuration applied")
 		}
 		c.reply(ctx, env.ID, err)
+		// Sent on success too. The panel has no other way to learn that a
+		// rolled-back node is serving the previous inbounds, and no way to
+		// learn that it has stopped doing so once the operator fixes it.
+		_ = c.send(ctx, proto.TypeState, 0, c.cfg.Engine.State())
 
 	case proto.TypeUsers:
 		var ud proto.UsersData

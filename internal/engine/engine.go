@@ -40,6 +40,13 @@ type Engine struct {
 	// having torn down a working data plane.
 	current json.RawMessage
 
+	// What is actually being served, and why it is not what the panel last
+	// sent. Both are reported upstream after every apply: the panel cannot
+	// otherwise tell a configuration that took effect from one that was
+	// rejected and rolled back.
+	activeTags []string
+	applyErr   string
+
 	// Loopback API addresses this node chose for itself; see apis.go.
 	apis localAPIs
 
@@ -87,8 +94,10 @@ func (e *Engine) ApplyConfig(ctx context.Context, raw json.RawMessage) error {
 	previous := e.current
 	applyErr := e.swapLocked(options, raw)
 	if applyErr == nil {
+		e.applyErr = ""
 		return nil
 	}
+	e.applyErr = applyErr.Error()
 
 	// Building the new instance happens before the old one is stopped, so a
 	// failure there costs nothing and e.running is still true. A failure to
@@ -149,12 +158,31 @@ func (e *Engine) swapLocked(options option.Options, raw json.RawMessage) error {
 	e.box, e.cancel, e.ctx, e.running = instance, cancel, boxCtx, true
 	e.current = append(json.RawMessage(nil), raw...)
 
+	e.activeTags = e.activeTags[:0]
+	for _, in := range options.Inbounds {
+		e.activeTags = append(e.activeTags, in.Tag)
+	}
+
 	// Counters belong to an instance. Carrying them across a restart would
 	// report a delta measured against numbers that no longer exist.
 	e.counters.reset()
 
 	e.log.Info("sing-box started", "inbounds", len(options.Inbounds))
 	return nil
+}
+
+// State is what this node is serving right now, and the reason it differs from
+// what the panel last sent, if it does.
+func (e *Engine) State() proto.StateData {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Copied: activeTags is rewritten in place on the next apply, and the
+	// caller marshals this after the lock is gone.
+	return proto.StateData{
+		Inbounds: append([]string(nil), e.activeTags...),
+		Error:    e.applyErr,
+	}
 }
 
 // parseOptions decodes a configuration using sing-box's own decoder, which
@@ -188,6 +216,9 @@ func (e *Engine) stopLocked() {
 	if e.cancel != nil {
 		e.cancel()
 	}
+	// Nothing is being served once this returns, and saying otherwise upstream
+	// would be worse than saying nothing.
+	e.activeTags = e.activeTags[:0]
 	e.box, e.cancel, e.ctx, e.running = nil, nil, nil, false
 }
 
