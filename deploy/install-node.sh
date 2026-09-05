@@ -25,10 +25,27 @@ ok()   { printf '%s  ok%s %s\n' "$GRN" "$RST" "$*"; }
 warn() { printf '%s warn%s %s\n' "$YLW" "$RST" "$*"; }
 die()  { printf '%s fail%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
 
+ACTION=install
+
 usage() {
     cat <<EOF
-Usage: sudo ./install-node.sh --panel <url> --token <token> [options]
+Usage: sudo ./install-node.sh [--panel <url> --token <token>] [options]
 
+Actions (default: install)
+  --version         What is installed, including the sing-box it embeds.
+  --upgrade         Rebuild from the current sources and restart. Reads the
+                    panel URL and token back from ${ROOT}/node.env, so it needs
+                    no arguments. This is also how the sing-box core is updated:
+                    the node links it, so a rebuild is the upgrade.
+  --uninstall       Stop and remove the service and the binary. Keeps the
+                    certificate and ${ROOT}/node.env, so a reinstall is a
+                    no-argument --upgrade away.
+  --purge           --uninstall, and delete everything else this installer
+                    created: the environment file, the certificate, the build
+                    cache, the Let's Encrypt account for this node's domain,
+                    and Docker if this script was the one that installed it.
+
+Install options
   --panel <url>     Panel base URL, e.g. https://panel.example.com
   --token <token>   Join token, shown once when the node was added in the panel.
 
@@ -49,18 +66,108 @@ EOF
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --panel)    PANEL=$2; shift 2 ;;
-        --token)    TOKEN=$2; shift 2 ;;
-        --domain)   DOMAIN=$2; shift 2 ;;
-        --email)    EMAIL=$2; shift 2 ;;
-        --cf-token) CF_TOKEN=$2; shift 2 ;;
-        --no-cert)  SKIP_CERT=1; shift ;;
-        --src)      SRC_DIR=$2; shift 2 ;;
-        --fork)     FORK_DIR=$2; shift 2 ;;
-        -h|--help)  usage; exit 0 ;;
+        --version)   ACTION=version; shift ;;
+        --upgrade)   ACTION=upgrade; shift ;;
+        --uninstall) ACTION=uninstall; shift ;;
+        --purge)     ACTION=purge; shift ;;
+        --panel)     PANEL=$2; shift 2 ;;
+        --token)     TOKEN=$2; shift 2 ;;
+        --domain)    DOMAIN=$2; shift 2 ;;
+        --email)     EMAIL=$2; shift 2 ;;
+        --cf-token)  CF_TOKEN=$2; shift 2 ;;
+        --no-cert)   SKIP_CERT=1; shift ;;
+        --src)       SRC_DIR=$2; shift 2 ;;
+        --fork)      FORK_DIR=$2; shift 2 ;;
+        -h|--help)   usage; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
 done
+
+# ───────────────────────── version / uninstall / purge ─────────────────────
+
+if [ "$ACTION" = version ]; then
+    if [ -x "$ROOT/skysbx-node" ]; then
+        "$ROOT/skysbx-node" -version
+        printf 'installed  %s\n' "$(stat -c %y "$ROOT/skysbx-node" 2>/dev/null | cut -d. -f1)"
+        systemctl is-active --quiet skysbx-node \
+            && printf 'service    running\n' || printf 'service    not running\n'
+    else
+        printf 'skysbx-node is not installed at %s\n' "$ROOT"
+    fi
+    exit 0
+fi
+
+if [ "$ACTION" = uninstall ] || [ "$ACTION" = purge ]; then
+    [ "$(id -u)" = 0 ] || die "run as root"
+
+    say "removing the service"
+    systemctl disable --now skysbx-node >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/skysbx-node.service
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl reset-failed 2>/dev/null || true
+    ok "skysbx-node stopped and removed"
+
+    rm -f "$ROOT/skysbx-node"
+    # The build tree is this installer's scratch space, not data: it is a fresh
+    # clone on every run.
+    rm -rf "$ROOT/build/skysbx-node" "$ROOT/build/skysbx-core"
+    ok "binary and build cache removed"
+
+    if [ "$ACTION" = purge ]; then
+        say "purging"
+        # Read the domain back before deleting the hook that names it.
+        PURGE_DOMAIN=$(sed -n 's|^LIVE=/etc/letsencrypt/live/||p' \
+            "$ROOT/certbot-deploy.sh" 2>/dev/null | head -1)
+        rm -f "$ROOT/node.env" "$ROOT/cert.pem" "$ROOT/key.pem" "$ROOT/certbot-deploy.sh"
+        if [ -n "$PURGE_DOMAIN" ] && command -v certbot >/dev/null 2>&1; then
+            certbot delete --cert-name "$PURGE_DOMAIN" --non-interactive >/dev/null 2>&1 \
+                && ok "certificate for $PURGE_DOMAIN deleted" || true
+        fi
+        # Only what this script pulled, and only if nothing is using it.
+        if command -v docker >/dev/null 2>&1; then
+            docker image rm golang:1.26.5 >/dev/null 2>&1 \
+                && ok "build image removed" || true
+        fi
+        # Docker goes only if this script was the one that installed it. A host
+        # that already ran Docker is running something in it.
+        if [ -f "$ROOT/.docker-installed-by-skysbx" ] && command -v docker >/dev/null 2>&1; then
+            say "removing docker (this script installed it)"
+            systemctl disable --now docker docker.socket containerd >/dev/null 2>&1 || true
+            apt-get purge -y -qq docker-ce docker-ce-cli containerd.io \
+                docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1 || true
+            apt-get autoremove -y -qq >/dev/null 2>&1 || true
+            rm -rf /var/lib/docker /var/lib/containerd /etc/docker
+            rm -f "$ROOT/.docker-installed-by-skysbx"
+            ok "docker removed"
+        fi
+    fi
+
+    # Shared with the panel when both are on one host, so it goes only if this
+    # was the last thing in it.
+    rmdir "$ROOT/build" 2>/dev/null || true
+    if rmdir "$ROOT" 2>/dev/null; then
+        ok "$ROOT removed"
+    else
+        warn "$ROOT kept — it still holds files (the panel's, or your own):"
+        ls -A "$ROOT" 2>/dev/null | sed 's/^/       /'
+    fi
+
+    printf '\n%sskysbx node removed.%s\n' "$GRN" "$RST"
+    [ "$ACTION" = uninstall ] && printf \
+        'The certificate and %s/node.env were kept; --purge removes those too.\n' "$ROOT"
+    exit 0
+fi
+
+if [ "$ACTION" = upgrade ]; then
+    [ -f "$ROOT/node.env" ] || die "nothing installed at $ROOT (run without --upgrade first)"
+    # shellcheck disable=SC1090
+    PANEL=${PANEL:-$(sed -n 's/^SKYSBX_PANEL=//p' "$ROOT/node.env")}
+    TOKEN=${TOKEN:-$(sed -n 's/^SKYSBX_TOKEN=//p' "$ROOT/node.env")}
+    [ -n "$PANEL" ] && [ -n "$TOKEN" ] || die "cannot read the panel URL and token from $ROOT/node.env"
+    # certbot renews on its own timer; an upgrade has no business reissuing.
+    SKIP_CERT=1
+    say "upgrading — panel $PANEL"
+fi
 
 ask() { # ask <var> <prompt>
     local __var=$1 __prompt=$2 __reply=""
@@ -142,9 +249,9 @@ else
     fetch skysbx-node "$BUILD/skysbx-node"
 fi
 if [ -n "$FORK_DIR" ]; then
-    rm -rf "$BUILD/sing-box-fork"; cp -a "$FORK_DIR" "$BUILD/sing-box-fork"; ok "using $FORK_DIR"
+    rm -rf "$BUILD/skysbx-core"; cp -a "$FORK_DIR" "$BUILD/skysbx-core"; ok "using $FORK_DIR"
 else
-    fetch sing-box-fork "$BUILD/sing-box-fork"
+    fetch skysbx-core "$BUILD/skysbx-core"
 fi
 
 find "$BUILD" -type f -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
@@ -152,7 +259,14 @@ find "$BUILD" -type f -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || tr
 if ! command -v docker >/dev/null; then
     say "installing docker (used only to build; nothing runs in it)"
     curl -fsSL https://get.docker.com | sh >/dev/null
+    # Remembered so --purge can remove Docker again without guessing. A host
+    # that already had it is running something in it.
+    touch "$ROOT/.docker-installed-by-skysbx"
 fi
+
+# Stamped into the binary so `--version` can answer what is running without
+# anyone reading a build log.
+VER=$(git -C "$BUILD/skysbx-node" rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 say "building"
 # The build tags are not optional: without them the binary compiles but exits at
@@ -164,7 +278,8 @@ docker run --rm -v "$BUILD:/src" -w /src/skysbx-node \
     golang:1.26.5 \
     go build -trimpath \
         -tags 'with_clash_api,with_v2ray_api,with_utls,with_acme,with_quic' \
-        -ldflags '-s -w -X github.com/sagernet/sing-box/constant.Version=1.14.0' \
+        -ldflags "-s -w -X main.version=$VER \
+                  -X github.com/sagernet/sing-box/constant.Version=1.14.0" \
         -o /src/skysbx-node/skysbx-node ./cmd/node
 install -m 0755 "$BUILD/skysbx-node/skysbx-node" "$ROOT/skysbx-node"
 ok "node binary installed"

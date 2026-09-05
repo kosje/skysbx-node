@@ -3,17 +3,21 @@
 #
 #   wget -qO- https://raw.githubusercontent.com/kosje/skysbx-node/main/install.sh | sh
 #
-# It will ask for the panel URL and the join token. Arguments are passed through
-# to deploy/install-node.sh, so a non-interactive install is:
+# It will ask for the panel URL and the join token. Arguments go through to
+# deploy/install-node.sh after `-s --`:
 #
-#   wget -qO- .../install.sh | sh -s -- --panel https://panel.example.com --token <token>
+#   ... | sh -s -- --panel https://panel.example.com --token <token>
+#   ... | sh -s -- --version      node and sing-box versions
+#   ... | sh -s -- --upgrade      rebuild and restart, sing-box core included
+#   ... | sh -s -- --uninstall    remove the service; keep the certificate
+#   ... | sh -s -- --purge        remove everything this installer created
 #
 # This file exists only to fetch the sources and hand over. Everything real is
 # in deploy/install-node.sh, which is worth reading before running either.
 set -eu
 
 REPO=${SKYSBX_REPO:-https://github.com/kosje/skysbx-node.git}
-FORK=${SKYSBX_FORK:-https://github.com/kosje/sing-box-fork.git}
+FORK=${SKYSBX_FORK:-https://github.com/kosje/skysbx-core.git}
 REF=${SKYSBX_REF:-main}
 
 RED=$(printf '\033[31m'); GRN=$(printf '\033[32m'); RST=$(printf '\033[0m')
@@ -38,14 +42,26 @@ fi
 SRC=$(mktemp -d)
 trap 'rm -rf "$SRC"' EXIT
 
-# Both repositories, because the node links a patched sing-box: the hot-swap of
-# an inbound's user set is not in upstream.
+# Removing something does not need the sources it was built from, and the core
+# is the big clone. Fetch it only when there is going to be a build.
+NEEDS_BUILD=1
+for arg in "$@"; do
+    case "$arg" in
+        --version|--uninstall|--purge|-h|--help) NEEDS_BUILD=0 ;;
+    esac
+done
+
 say "fetching $REPO@$REF"
 git clone -q --branch "$REF" --depth 1 "$REPO" "$SRC/skysbx-node" \
     || die "cannot clone $REPO"
-say "fetching $FORK@$REF"
-git clone -q --branch "$REF" --depth 1 "$FORK" "$SRC/sing-box-fork" \
-    || die "cannot clone $FORK"
+
+# The node links a patched sing-box: hot-swapping an inbound's user set is not
+# in upstream.
+if [ "$NEEDS_BUILD" = 1 ]; then
+    say "fetching $FORK@$REF"
+    git clone -q --branch "$REF" --depth 1 "$FORK" "$SRC/skysbx-core" \
+        || die "cannot clone $FORK"
+fi
 
 # A pipeline leaves stdin pointing at the downloaded script, not the terminal,
 # so the installer would find nothing to prompt on and refuse. Reattach the
@@ -60,7 +76,9 @@ git clone -q --branch "$REF" --depth 1 "$FORK" "$SRC/sing-box-fork" \
 # is, but the installer it hands over to is bash — on Debian /bin/sh is dash,
 # which fails on the first line with "Illegal option -o pipefail".
 command -v bash >/dev/null 2>&1 || die "bash is required"
-set -- --src "$SRC/skysbx-node" --fork "$SRC/sing-box-fork" "$@"
+if [ "$NEEDS_BUILD" = 1 ]; then
+    set -- --src "$SRC/skysbx-node" --fork "$SRC/skysbx-core" "$@"
+fi
 if ( exec 3>/dev/tty ) 2>/dev/null; then
     exec bash "$SRC/skysbx-node/deploy/install-node.sh" "$@" </dev/tty
 fi

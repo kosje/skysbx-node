@@ -16,15 +16,26 @@ skysbx 的数据面：内嵌 sing-box，由 [`skysbx-panel`](https://github.com/
 先在面板里 **Nodes → 新增**，复制那个只显示一次的接入 token，然后在这台服务器上：
 
 ```bash
-sudo sh -c "$(wget -qO- https://raw.githubusercontent.com/kosje/skysbx-node/main/install.sh)"
+wget -qO- https://raw.githubusercontent.com/kosje/skysbx-node/main/install.sh | sh
 ```
 
-它会问面板地址和 token。非交互：
+它会问面板地址和 token。带参数要加 `-s --`：
 
 ```bash
-sudo sh -c "$(wget -qO- https://raw.githubusercontent.com/kosje/skysbx-node/main/install.sh)" \
-  -- --panel https://panel.example.com --token <token>
+N=https://raw.githubusercontent.com/kosje/skysbx-node/main/install.sh
+
+wget -qO- $N | sh -s -- --panel https://panel.example.com --token <token>
+wget -qO- $N | sh -s -- --version      # 节点版本 + 内嵌的 sing-box 版本
+wget -qO- $N | sh -s -- --upgrade      # 重新构建并重启，含 sing-box 核心升级
+wget -qO- $N | sh -s -- --uninstall    # 卸载服务，保留证书和 node.env
+wget -qO- $N | sh -s -- --purge        # 连证书、构建缓存、脚本装的 Docker 一起清掉
 ```
+
+`--upgrade` 不需要任何参数：面板地址和 token 从 `/opt/skysbx/node.env` 读回来。
+
+**sing-box 核心怎么升级：** 核心是编进这个二进制里的，所以 `--upgrade` 重新构建一次
+就是升级 —— 它会重新拉 [`skysbx-core`](https://github.com/kosje/skysbx-core) 再编。
+没有单独的核心版本要管，也没有第二个进程要重启。
 
 `--domain` 是可选的：只有 AnyTLS 需要证书，Reality 用自己的密钥对认证、Shadowsocks
 没有 TLS 层，所以没证书的节点照样服务另外两个协议。给了域名脚本就用 certbot 签
