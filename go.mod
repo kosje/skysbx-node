@@ -1,4 +1,4 @@
-module github.com/kosje/skysb-node
+module github.com/kosje/skysbx-node
 
 go 1.26.5
 

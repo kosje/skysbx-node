@@ -23,7 +23,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/kosje/skysb-node/internal/proto"
+	"github.com/kosje/skysbx-node/internal/proto"
 )
 
 // Reporting intervals. Variables rather than constants so tests can shorten

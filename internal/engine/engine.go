@@ -24,7 +24,7 @@ import (
 	singJSON "github.com/sagernet/sing/common/json"
 	"github.com/sagernet/sing/service"
 
-	"github.com/kosje/skysb-node/internal/proto"
+	"github.com/kosje/skysbx-node/internal/proto"
 )
 
 type Engine struct {

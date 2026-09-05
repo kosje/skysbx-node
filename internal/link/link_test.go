@@ -13,7 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/kosje/skysb-node/internal/proto"
+	"github.com/kosje/skysbx-node/internal/proto"
 )
 
 // fakeEngine records what the control channel asked the data plane to do, and

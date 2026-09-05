@@ -1,6 +1,6 @@
-# skysb-node
+# skysbx-node
 
-skysb 的数据面：内嵌 sing-box，由 [`skysb-panel`](https://github.com/kosje/skysb-panel)
+skysbx 的数据面：内嵌 sing-box，由 [`skysbx-panel`](https://github.com/kosje/skysbx-panel)
 驱动。
 
 ## 许可
@@ -22,9 +22,9 @@ skysb 的数据面：内嵌 sing-box，由 [`skysb-panel`](https://github.com/ko
 **没有配置文件，没有监听的控制端口。** 只需要面板地址和一个 token；服务什么由面板决定。
 
 ```bash
-skysb-node -panel https://panel.example.com -token <token>
+skysbx-node -panel https://panel.example.com -token <token>
 # 或用环境变量，避免 token 出现在命令行里
-SKYSB_PANEL=... SKYSB_TOKEN=... skysb-node
+SKYSBX_PANEL=... SKYSBX_TOKEN=... skysbx-node
 ```
 
 ## 构建

@@ -1,4 +1,4 @@
-// Command node runs a skysb data plane: it dials its panel, applies whatever
+// Command node runs a skysbx data plane: it dials its panel, applies whatever
 // configuration it is given, and reports traffic back.
 //
 // It has no configuration file and no listening control port. Everything it
@@ -16,8 +16,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/kosje/skysb-node/internal/engine"
-	"github.com/kosje/skysb-node/internal/link"
+	"github.com/kosje/skysbx-node/internal/engine"
+	"github.com/kosje/skysbx-node/internal/link"
 )
 
 // version is stamped at build time with -ldflags "-X main.version=...".
@@ -25,18 +25,18 @@ var version = "dev"
 
 func main() {
 	var (
-		panelURL = flag.String("panel", envOr("SKYSB_PANEL", ""),
+		panelURL = flag.String("panel", envOr("SKYSBX_PANEL", ""),
 			"panel base URL, e.g. https://panel.example.com")
-		token = flag.String("token", envOr("SKYSB_TOKEN", ""),
+		token = flag.String("token", envOr("SKYSBX_TOKEN", ""),
 			"node token issued by the panel")
-		logLevel = flag.String("log", envOr("SKYSB_LOG", "info"),
+		logLevel = flag.String("log", envOr("SKYSBX_LOG", "info"),
 			"log level: debug, info, warn, error")
 		showVersion = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("skysb-node %s (sing-box %s)\n", version, engine.New(nil).SingboxVersion())
+		fmt.Printf("skysbx-node %s (sing-box %s)\n", version, engine.New(nil).SingboxVersion())
 		return
 	}
 
@@ -46,7 +46,7 @@ func main() {
 	// as well as a flag: a command line is visible to every process on the host.
 	if *panelURL == "" || *token == "" {
 		log.Error("both a panel URL and a token are required",
-			"hint", "pass -panel and -token, or set SKYSB_PANEL and SKYSB_TOKEN")
+			"hint", "pass -panel and -token, or set SKYSBX_PANEL and SKYSBX_TOKEN")
 		os.Exit(2)
 	}
 

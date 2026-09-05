@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Install a skysb node on a Debian/Ubuntu host and point it at a panel.
+# Install a skysbx node on a Debian/Ubuntu host and point it at a panel.
 #
 #   sudo ./install-node.sh --panel https://panel.example.com --token <token>
 #
 # Re-running upgrades the binary in place.
 set -euo pipefail
 
-ROOT=${SKYSB_ROOT:-/opt/skysb}
+ROOT=${SKYSBX_ROOT:-/opt/skysbx}
 PANEL=""
 TOKEN=""
 DOMAIN=""
@@ -16,8 +16,8 @@ SKIP_CERT=0
 SRC_DIR=""
 FORK_DIR=""
 GH_TOKEN=${GITHUB_TOKEN:-}
-GH_OWNER=${SKYSB_GH_OWNER:-kosje}
-REF=${SKYSB_REF:-main}
+GH_OWNER=${SKYSBX_GH_OWNER:-kosje}
+REF=${SKYSBX_REF:-main}
 
 RED=$'\e[31m'; GRN=$'\e[32m'; YLW=$'\e[33m'; BLD=$'\e[1m'; RST=$'\e[0m'
 say()  { printf '%s==>%s %s\n' "$BLD" "$RST" "$*"; }
@@ -128,9 +128,9 @@ fetch() { # fetch <repo> <dest>
 
 say "sources"
 if [ -n "$SRC_DIR" ]; then
-    rm -rf "$BUILD/skysb-node"; cp -a "$SRC_DIR" "$BUILD/skysb-node"; ok "using $SRC_DIR"
+    rm -rf "$BUILD/skysbx-node"; cp -a "$SRC_DIR" "$BUILD/skysbx-node"; ok "using $SRC_DIR"
 else
-    fetch skysb-node "$BUILD/skysb-node"
+    fetch skysbx-node "$BUILD/skysbx-node"
 fi
 if [ -n "$FORK_DIR" ]; then
     rm -rf "$BUILD/sing-box-fork"; cp -a "$FORK_DIR" "$BUILD/sing-box-fork"; ok "using $FORK_DIR"
@@ -150,14 +150,14 @@ say "building"
 # startup on "clash api is not included in this build". Go must be 1.26.x —
 # 1.27 fails to link, because sing-box reaches an unexported http2 field through
 # go:linkname.
-docker run --rm -v "$BUILD:/src" -w /src/skysb-node \
+docker run --rm -v "$BUILD:/src" -w /src/skysbx-node \
     -e GOFLAGS=-buildvcs=false -e CGO_ENABLED=0 -e GOOS=linux \
     golang:1.26.5 \
     go build -trimpath \
         -tags 'with_clash_api,with_v2ray_api,with_utls,with_acme,with_quic' \
         -ldflags '-s -w -X github.com/sagernet/sing-box/constant.Version=1.14.0' \
-        -o /src/skysb-node/skysb-node ./cmd/node
-install -m 0755 "$BUILD/skysb-node/skysb-node" "$ROOT/skysb-node"
+        -o /src/skysbx-node/skysbx-node ./cmd/node
+install -m 0755 "$BUILD/skysbx-node/skysbx-node" "$ROOT/skysbx-node"
 ok "node binary installed"
 
 # ────────────────────────────── certificate ───────────────────────────────
@@ -178,7 +178,7 @@ LIVE=/etc/letsencrypt/live/$DOMAIN
 [ -f "\$LIVE/fullchain.pem" ] || exit 0
 install -m 0644 "\$LIVE/fullchain.pem" "$ROOT/cert.pem"
 install -m 0600 "\$LIVE/privkey.pem"   "$ROOT/key.pem"
-systemctl is-active --quiet skysb-node && systemctl restart skysb-node || true
+systemctl is-active --quiet skysbx-node && systemctl restart skysbx-node || true
 EOF
     chmod 0755 "$ROOT/certbot-deploy.sh"
 
@@ -212,15 +212,15 @@ say "service"
 # The token goes in an environment file rather than the command line, which is
 # readable by every process on the host.
 cat > "$ROOT/node.env" <<EOF
-SKYSB_PANEL=${PANEL}
-SKYSB_TOKEN=${TOKEN}
-SKYSB_LOG=info
+SKYSBX_PANEL=${PANEL}
+SKYSBX_TOKEN=${TOKEN}
+SKYSBX_LOG=info
 EOF
 chmod 600 "$ROOT/node.env"
 
-cat > /etc/systemd/system/skysb-node.service <<EOF
+cat > /etc/systemd/system/skysbx-node.service <<EOF
 [Unit]
-Description=skysb node (embedded sing-box data plane)
+Description=skysbx node (embedded sing-box data plane)
 After=network-online.target
 Wants=network-online.target
 
@@ -228,7 +228,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=${ROOT}
 EnvironmentFile=${ROOT}/node.env
-ExecStart=${ROOT}/skysb-node
+ExecStart=${ROOT}/skysbx-node
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
@@ -247,27 +247,27 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable -q skysb-node
+systemctl enable -q skysbx-node
 # restart, not `enable --now`: on an upgrade the binary has just been replaced
 # and --now would leave the old process running.
-systemctl restart skysb-node
+systemctl restart skysbx-node
 sleep 5
 
-if systemctl is-active --quiet skysb-node; then
+if systemctl is-active --quiet skysbx-node; then
     ok "node is running"
 else
-    warn "node did not start: journalctl -u skysb-node -n 50"
+    warn "node did not start: journalctl -u skysbx-node -n 50"
 fi
 
 cat <<EOF
 
-${GRN}skysb node
+${GRN}skysbx node
 ==========
 Panel     ${PANEL}
 $([ -n "$DOMAIN" ] && echo "Domain    ${DOMAIN}")
 Data      ${ROOT}
 
-Logs      journalctl -u skysb-node -f
+Logs      journalctl -u skysbx-node -f
 
 The node dials the panel, so it needs no inbound control port and no route from
 it. Add inbounds in the panel; they take effect within seconds.${RST}

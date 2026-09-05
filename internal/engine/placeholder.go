@@ -10,7 +10,7 @@ import (
 // placeholderUser is the name given to the filler entry below. It never
 // authenticates anyone: its key is random, is generated per apply, and is never
 // sent anywhere.
-const placeholderUser = "__skysb_placeholder__"
+const placeholderUser = "__skysbx_placeholder__"
 
 // ensureShadowsocksUsers gives every Shadowsocks inbound at least one user.
 //
