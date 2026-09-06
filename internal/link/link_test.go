@@ -440,3 +440,33 @@ func TestStatsBaselineAdvancesOnlyOnSuccess(t *testing.T) {
 		t.Fatalf("%d acknowledgements for %d reads", acks, got)
 	}
 }
+
+// The join token goes out in an Authorization header on every reconnect. Over
+// plain HTTP that is a long-lived credential for this node, in the clear, on a
+// schedule — and it is worth more than the traffic it protects, because it lets
+// the holder be this node.
+func TestPlainHTTPPanelIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		url string
+		ok  bool
+	}{
+		{"https://panel.example.com", true},
+		{"https://panel.example.com:8443/base", true},
+		{"http://panel.example.com", false},
+		{"http://203.0.113.9:8080", false},
+		// Loopback is where the protocol is developed and tested, and there is
+		// no network there to read the token off.
+		{"http://127.0.0.1:8080", true},
+		{"http://localhost:8080", true},
+		{"http://[::1]:8080", true},
+		{"ftp://panel.example.com", false},
+	} {
+		_, err := New(Config{PanelURL: tc.url, Token: "t", Engine: &fakeEngine{}})
+		if tc.ok && err != nil {
+			t.Errorf("New(%q) = %v, want accepted", tc.url, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("New(%q) was accepted; the token would go out in the clear", tc.url)
+		}
+	}
+}

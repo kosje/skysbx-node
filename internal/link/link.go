@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -153,6 +154,18 @@ func New(cfg Config) (*Client, error) {
 	case "https":
 		u.Scheme = "wss"
 	case "http":
+		// The join token goes out in an Authorization header on every connect
+		// and every reconnect. Over plain HTTP that is a long-lived credential
+		// for this node, in the clear, on a schedule — and it is worth more than
+		// the traffic it protects, because it lets the holder be this node.
+		//
+		// Allowed only against loopback, which is how the protocol is developed
+		// and tested and where there is no network to read it off.
+		if !isLoopback(u.Hostname()) {
+			return nil, fmt.Errorf(
+				"panel URL %q is plain HTTP: the node token would be sent in the "+
+					"clear on every reconnect. Use https://", cfg.PanelURL)
+		}
 		u.Scheme = "ws"
 	default:
 		return nil, fmt.Errorf("panel URL %q must be http or https", cfg.PanelURL)
@@ -164,6 +177,17 @@ func New(cfg Config) (*Client, error) {
 		log = slog.Default()
 	}
 	return &Client{cfg: cfg, log: log, wsURL: u.String()}, nil
+}
+
+// isLoopback reports whether a host is this machine. Names as well as
+// literals: "localhost" is what a developer types, and refusing it would make
+// the check something to work around rather than something to keep.
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 // Run keeps the channel up until ctx is cancelled.
