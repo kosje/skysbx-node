@@ -43,6 +43,17 @@ skysbx 的数据面：内嵌 sing-box，由 [`skysbx-panel`](https://github.com/
 wget -qO- https://raw.githubusercontent.com/kosje/skysbx-node/main/install.sh | sh
 ```
 
+安装会在 `/usr/local/bin/skysbx` 留一个命令，之后维护这台机器不用再记 URL：
+
+```bash
+skysbx            # 菜单：版本 / 升级 / 卸载 / 清除，以及在这台机器上加装面板
+skysbx version
+skysbx upgrade
+```
+
+它由面板仓库维护（同时管两半，不属于任何一半），所以是**尽力而为**——取不到只是少一个
+快捷方式，节点本身不受影响。
+
 它会问面板地址和 token。带参数要加 `-s --`：
 
 ```bash

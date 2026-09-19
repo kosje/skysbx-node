@@ -522,17 +522,18 @@ EOF
 # because it manages both halves and belongs to neither; a node-only host still
 # wants it. Best effort: a host that could not fetch one convenience script
 # still has a working node, and the installer below is unaffected either way.
-if [ ! -x /usr/local/bin/skysbx ]; then
-    if curl -fsSL --max-time 30 -o /tmp/skysbx.$$ \
-            "https://raw.githubusercontent.com/${GH_OWNER}/skysbx-panel/main/skysbx.sh" \
-       && [ -s /tmp/skysbx.$$ ]; then
-        install -m 0755 /tmp/skysbx.$$ /usr/local/bin/skysbx
-        ok "skysbx command installed"
-    else
-        warn "could not install the 'skysbx' shortcut; the node is unaffected"
-    fi
-    rm -f /tmp/skysbx.$$
+# Refreshed on every run, not just when missing: an upgrade is exactly when a
+# shortcut that has fallen behind should be brought up to date, and skipping it
+# when one already exists means it never is.
+if curl -fsSL --max-time 30 -o /tmp/skysbx.$$ \
+        "https://raw.githubusercontent.com/${GH_OWNER}/skysbx-panel/main/skysbx.sh" \
+   && [ -s /tmp/skysbx.$$ ]; then
+    install -m 0755 /tmp/skysbx.$$ /usr/local/bin/skysbx
+    ok "skysbx command installed"
+else
+    warn "could not install the 'skysbx' shortcut; the node is unaffected"
 fi
+rm -f /tmp/skysbx.$$
 
 systemctl daemon-reload
 systemctl enable -q skysbx-node
