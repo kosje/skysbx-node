@@ -18,6 +18,11 @@ FORK_DIR=""
 GH_TOKEN=${GITHUB_TOKEN:-}
 GH_OWNER=${SKYSBX_GH_OWNER:-kosje}
 REF=${SKYSBX_REF:-main}
+# The fork is a separate repository on its own release line and does not carry
+# this one's branches. It deliberately does not inherit SKYSBX_REF: pointing
+# the node at a branch used to try to clone a same-named branch of the fork,
+# which does not exist, and the failure was reported as a missing token.
+FORK_REF=${SKYSBX_FORK_REF:-main}
 
 RED=$'\e[31m'; GRN=$'\e[32m'; YLW=$'\e[33m'; BLD=$'\e[1m'; RST=$'\e[0m'
 say()  { printf '%s==>%s %s\n' "$BLD" "$RST" "$*"; }
@@ -237,21 +242,28 @@ install -d -m 0700 "$ROOT"
 BUILD=$ROOT/build
 mkdir -p "$BUILD"
 
-fetch() { # fetch <repo> <dest>
-    local repo=$1 dest=$2
+fetch() { # fetch <repo> <dest> <ref>
+    local repo=$1 dest=$2 ref=$3
     local url="https://github.com/${GH_OWNER}/${repo}.git"
     rm -rf "$dest"
     # The token goes in a per-command header, not in the URL: git writes the
     # remote URL into the clone's .git/config, and a token in it would sit on
     # disk for as long as the build directory does.
+    #
+    # The failure names the ref it asked for rather than blaming the token: a
+    # branch that does not exist fails exactly like a repository you cannot
+    # see, and saying "needs GITHUB_TOKEN" to someone whose branch name is
+    # simply wrong sends them somewhere there is nothing to find.
     if [ -n "$GH_TOKEN" ]; then
         git -c "http.extraHeader=Authorization: Basic $(printf 'x-access-token:%s' \
             "$GH_TOKEN" | base64 -w0)" \
-            clone -q --branch "$REF" --depth 1 "$url" "$dest" \
-            || die "cannot clone ${GH_OWNER}/${repo} (check GITHUB_TOKEN)"
+            clone -q --branch "$ref" --depth 1 "$url" "$dest" \
+            || die "cannot clone ${GH_OWNER}/${repo}@${ref}
+  The branch may not exist, or GITHUB_TOKEN may not grant access to this repo."
     else
-        git clone -q --branch "$REF" --depth 1 "$url" "$dest" \
-            || die "cannot clone ${GH_OWNER}/${repo} (a private repo needs GITHUB_TOKEN)"
+        git clone -q --branch "$ref" --depth 1 "$url" "$dest" \
+            || die "cannot clone ${GH_OWNER}/${repo}@${ref}
+  The branch may not exist; if the repository is private, set GITHUB_TOKEN."
     fi
     ok "${repo}@$(git -C "$dest" rev-parse --short HEAD)"
 }
@@ -260,12 +272,12 @@ say "sources"
 if [ -n "$SRC_DIR" ]; then
     rm -rf "$BUILD/skysbx-node"; cp -a "$SRC_DIR" "$BUILD/skysbx-node"; ok "using $SRC_DIR"
 else
-    fetch skysbx-node "$BUILD/skysbx-node"
+    fetch skysbx-node "$BUILD/skysbx-node" "$REF"
 fi
 if [ -n "$FORK_DIR" ]; then
     rm -rf "$BUILD/skysbx-core"; cp -a "$FORK_DIR" "$BUILD/skysbx-core"; ok "using $FORK_DIR"
 else
-    fetch skysbx-core "$BUILD/skysbx-core"
+    fetch skysbx-core "$BUILD/skysbx-core" "$FORK_REF"
 fi
 
 find "$BUILD" -type f -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
