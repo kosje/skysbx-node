@@ -55,13 +55,10 @@ say "fetching $REPO@$REF"
 git clone -q --branch "$REF" --depth 1 "$REPO" "$SRC/skysbx-node" \
     || die "cannot clone $REPO"
 
-# The node links a patched sing-box: hot-swapping an inbound's user set is not
-# in upstream.
-if [ "$NEEDS_BUILD" = 1 ]; then
-    say "fetching $FORK@$REF"
-    git clone -q --branch "$REF" --depth 1 "$FORK" "$SRC/skysbx-core" \
-        || die "cannot clone $FORK"
-fi
+# The fork is not fetched here any more. It is only needed for a build, and the
+# installer prefers a published binary — cloning the whole of sing-box before
+# finding out we are not going to compile it was the slowest thing this script
+# did. When there is a build, the installer fetches it itself.
 
 # A pipeline leaves stdin pointing at the downloaded script, not the terminal,
 # so the installer would find nothing to prompt on and refuse. Reattach the
@@ -76,8 +73,14 @@ fi
 # is, but the installer it hands over to is bash — on Debian /bin/sh is dash,
 # which fails on the first line with "Illegal option -o pipefail".
 command -v bash >/dev/null 2>&1 || die "bash is required"
+# Handed over in the environment rather than as --src, because the two mean
+# different things. --src is an operator saying "build this checkout, not
+# whatever is published"; this is only "the clone I already had to make to find
+# the installer is over here, reuse it if you end up building". Passing it as
+# --src would have told the installer never to look for a published binary.
 if [ "$NEEDS_BUILD" = 1 ]; then
-    set -- --src "$SRC/skysbx-node" --fork "$SRC/skysbx-core" "$@"
+    SKYSBX_LAUNCHER_SRC="$SRC/skysbx-node"
+    export SKYSBX_LAUNCHER_SRC
 fi
 if ( exec 3>/dev/tty ) 2>/dev/null; then
     exec bash "$SRC/skysbx-node/deploy/install-node.sh" "$@" </dev/tty

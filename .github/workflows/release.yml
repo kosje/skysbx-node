@@ -1,0 +1,75 @@
+name: release
+
+# Publishes the binaries the installer prefers to download. Tag and push:
+#
+#     git tag v0.1.0 && git push origin v0.1.0
+#
+# Without a release the installer still works — it falls back to building from
+# source — so a tag that is never cut costs correctness nothing, only time on
+# whoever installs next.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # go.mod carries `replace github.com/sagernet/sing-box => ../skysbx-core`,
+      # so the fork has to sit beside this checkout, not inside it.
+      - uses: actions/checkout@v4
+        with:
+          path: skysbx-node
+      - uses: actions/checkout@v4
+        with:
+          repository: kosje/skysbx-core
+          ref: main
+          path: skysbx-core
+
+      # 1.26.x is not a preference: 1.27 fails to link, because sing-box
+      # reaches an unexported http2 field through go:linkname.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.5'
+          check-latest: false
+          cache-dependency-path: skysbx-node/go.sum
+
+      - name: build
+        working-directory: skysbx-node
+        run: |
+          set -euo pipefail
+          VER=${GITHUB_REF_NAME:-dev}
+          SB=$(git -C ../skysbx-core describe --tags --always 2>/dev/null || echo 1.14.0)
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            # The build tags are not optional: without them the binary compiles
+            # but exits at startup on "clash api is not included in this build".
+            GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+              go build -trimpath \
+                -tags 'with_clash_api,with_v2ray_api,with_utls,with_acme,with_quic' \
+                -ldflags "-s -w -X main.version=$VER \
+                          -X github.com/sagernet/sing-box/constant.Version=1.14.0" \
+                -o "dist/skysbx-node-linux-$arch" ./cmd/node
+          done
+          # The installer verifies against this file, so it has to list exactly
+          # the names it will ask for — bare, no directory component.
+          cd dist && sha256sum skysbx-node-linux-* > SHA256SUMS
+          cat SHA256SUMS
+          echo "sing-box fork: $SB"
+
+      # Started by the node at boot, so a binary that cannot run is worth
+      # catching here rather than on someone's server.
+      - name: smoke test the amd64 binary
+        working-directory: skysbx-node
+        run: ./dist/skysbx-node-linux-amd64 -version
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            skysbx-node/dist/skysbx-node-linux-amd64
+            skysbx-node/dist/skysbx-node-linux-arm64
+            skysbx-node/dist/SHA256SUMS

@@ -23,6 +23,11 @@ REF=${SKYSBX_REF:-main}
 # the node at a branch used to try to clone a same-named branch of the fork,
 # which does not exist, and the failure was reported as a missing token.
 FORK_REF=${SKYSBX_FORK_REF:-main}
+FROM_SOURCE=0
+# Empty means whatever the newest release is. Pin it to reinstall the exact
+# version a working host is already running.
+SKYSBX_VERSION=${SKYSBX_VERSION:-}
+LAUNCHER_SRC=${SKYSBX_LAUNCHER_SRC:-}
 
 RED=$'\e[31m'; GRN=$'\e[32m'; YLW=$'\e[33m'; BLD=$'\e[1m'; RST=$'\e[0m'
 say()  { printf '%s==>%s %s\n' "$BLD" "$RST" "$*"; }
@@ -64,6 +69,7 @@ Install options
   --no-cert         Skip certificate issuance.
 
   --src <dir>       Build from a checkout on disk instead of cloning.
+  --from-source     Build from source instead of downloading a published binary.
   --fork <dir>      Path to the patched sing-box; defaults to a sibling clone.
   -h, --help        This text.
 EOF
@@ -82,6 +88,7 @@ while [ $# -gt 0 ]; do
         --cf-token)  CF_TOKEN=$2; shift 2 ;;
         --no-cert)   SKIP_CERT=1; shift ;;
         --src)       SRC_DIR=$2; shift 2 ;;
+        --from-source) FROM_SOURCE=1; shift ;;
         --fork)      FORK_DIR=$2; shift 2 ;;
         -h|--help)   usage; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
@@ -268,19 +275,82 @@ fetch() { # fetch <repo> <dest> <ref>
     ok "${repo}@$(git -C "$dest" rev-parse --short HEAD)"
 }
 
-say "sources"
-if [ -n "$SRC_DIR" ]; then
-    rm -rf "$BUILD/skysbx-node"; cp -a "$SRC_DIR" "$BUILD/skysbx-node"; ok "using $SRC_DIR"
-else
-    fetch skysbx-node "$BUILD/skysbx-node" "$REF"
-fi
-if [ -n "$FORK_DIR" ]; then
-    rm -rf "$BUILD/skysbx-core"; cp -a "$FORK_DIR" "$BUILD/skysbx-core"; ok "using $FORK_DIR"
-else
-    fetch skysbx-core "$BUILD/skysbx-core" "$FORK_REF"
-fi
+# ─────────────────────────── a published binary ───────────────────────────
+#
+# This build is the expensive one — sing-box with every tag, measured at 3m12s
+# on a single core — and it is the reason a small VPS feels slow to set up. A
+# published build is ~40MB and lands in seconds.
+#
+# Tried before the sources are fetched, not after: when it succeeds there is
+# nothing to compile, so there is no reason to clone this repository and the
+# whole of the sing-box fork first — and no reason to need git at all.
+#
+# It is a preference, not a requirement: no release, an unpublished
+# architecture, or no route to GitHub's CDN all fall through to building, which
+# always works. --from-source goes straight there.
+try_release() {
+    [ "$FROM_SOURCE" = 1 ] && return 1
+    [ -n "$SRC_DIR" ] && return 1   # asked for this checkout specifically
+    [ -n "$FORK_DIR" ] && return 1  # asked for this fork specifically
 
-find "$BUILD" -type f -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+    case $(uname -m) in
+        x86_64|amd64)  rel_arch=amd64 ;;
+        aarch64|arm64) rel_arch=arm64 ;;
+        *) return 1 ;;
+    esac
+
+    local base="https://github.com/${GH_OWNER}/skysbx-node/releases"
+    # GitHub serves the newest release's assets from this path, so resolving a
+    # version through the API — and its rate limit, and its JSON — is avoidable.
+    local from="$base/latest/download"
+    [ -n "$SKYSBX_VERSION" ] && from="$base/download/$SKYSBX_VERSION"
+
+    local tmp; tmp=$(mktemp -d)
+    local asset="skysbx-node-linux-$rel_arch"
+    say "looking for a published build"
+    if ! curl -fsSL --max-time 180 -o "$tmp/$asset" "$from/$asset" \
+      || ! curl -fsSL --max-time 30 -o "$tmp/SHA256SUMS" "$from/SHA256SUMS"; then
+        rm -rf "$tmp"
+        return 1
+    fi
+    # Same rule as the toolchain tarball: nothing unverified gets installed and
+    # run as root. A mismatch stops the install rather than falling back — a
+    # release that does not match its own checksums is worth looking at.
+    if ! ( cd "$tmp" && grep " $asset\$" SHA256SUMS | sha256sum -c - >/dev/null 2>&1 ); then
+        rm -rf "$tmp"
+        die "the published node binary did not match its checksum.
+  Refusing to install it. Re-run with --from-source to build instead."
+    fi
+    install -m 0755 "$tmp/$asset" "$ROOT/skysbx-node"
+    rm -rf "$tmp"
+    ok "installed a published build ($rel_arch)"
+    return 0
+}
+
+HAVE_BINARY=0
+try_release && HAVE_BINARY=1
+
+if [ "$HAVE_BINARY" = 0 ]; then
+    say "sources"
+    # LAUNCHER_SRC is the clone install.sh already made to find this script. It
+    # is reused rather than re-cloned, but it is deliberately not --src: only an
+    # operator passing --src means "do not look for a published binary".
+    if [ -n "$SRC_DIR" ]; then
+        rm -rf "$BUILD/skysbx-node"; cp -a "$SRC_DIR" "$BUILD/skysbx-node"; ok "using $SRC_DIR"
+    elif [ -n "$LAUNCHER_SRC" ] && [ -d "$LAUNCHER_SRC" ]; then
+        rm -rf "$BUILD/skysbx-node"; cp -a "$LAUNCHER_SRC" "$BUILD/skysbx-node"
+        ok "reusing the clone the launcher made"
+    else
+        fetch skysbx-node "$BUILD/skysbx-node" "$REF"
+    fi
+    if [ -n "$FORK_DIR" ]; then
+        rm -rf "$BUILD/skysbx-core"; cp -a "$FORK_DIR" "$BUILD/skysbx-core"; ok "using $FORK_DIR"
+    else
+        fetch skysbx-core "$BUILD/skysbx-core" "$FORK_REF"
+    fi
+
+    find "$BUILD" -type f -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+fi
 
 # ────────────────────────────── go toolchain ──────────────────────────────
 #
@@ -329,29 +399,31 @@ ensure_go() {
     ok "go $GO_VERSION ready"
 }
 
-ensure_go
+if [ "$HAVE_BINARY" = 0 ]; then
+    ensure_go
 
-# Stamped into the binary so `--version` can answer what is running without
-# anyone reading a build log.
-VER=$(git -C "$BUILD/skysbx-node" rev-parse --short HEAD 2>/dev/null || echo unknown)
+    # Stamped into the binary so `--version` can answer what is running without
+    # anyone reading a build log.
+    VER=$(git -C "$BUILD/skysbx-node" rev-parse --short HEAD 2>/dev/null || echo unknown)
 
-say "building"
-# The build tags are not optional: without them the binary compiles but exits at
-# startup on "clash api is not included in this build".
-#
-# GOTOOLCHAIN=local is what makes the version pin real: without it Go reads the
-# `go` line in a go.mod and will silently fetch and use a newer toolchain —
-# here that would be the 1.27 this build cannot be linked with.
-( cd "$BUILD/skysbx-node" && env \
-    GOTOOLCHAIN=local GOFLAGS=-buildvcs=false CGO_ENABLED=0 GOOS=linux \
-    GOMODCACHE="$ROOT/go-mod-cache" GOCACHE="$ROOT/go-build-cache" \
-    "$GO" build -trimpath \
-        -tags 'with_clash_api,with_v2ray_api,with_utls,with_acme,with_quic' \
-        -ldflags "-s -w -X main.version=$VER \
-                  -X github.com/sagernet/sing-box/constant.Version=1.14.0" \
-        -o skysbx-node ./cmd/node )
-install -m 0755 "$BUILD/skysbx-node/skysbx-node" "$ROOT/skysbx-node"
-ok "node binary installed"
+    say "building"
+    # The build tags are not optional: without them the binary compiles but exits at
+    # startup on "clash api is not included in this build".
+    #
+    # GOTOOLCHAIN=local is what makes the version pin real: without it Go reads the
+    # `go` line in a go.mod and will silently fetch and use a newer toolchain —
+    # here that would be the 1.27 this build cannot be linked with.
+    ( cd "$BUILD/skysbx-node" && env \
+        GOTOOLCHAIN=local GOFLAGS=-buildvcs=false CGO_ENABLED=0 GOOS=linux \
+        GOMODCACHE="$ROOT/go-mod-cache" GOCACHE="$ROOT/go-build-cache" \
+        "$GO" build -trimpath \
+            -tags 'with_clash_api,with_v2ray_api,with_utls,with_acme,with_quic' \
+            -ldflags "-s -w -X main.version=$VER \
+                      -X github.com/sagernet/sing-box/constant.Version=1.14.0" \
+            -o skysbx-node ./cmd/node )
+    install -m 0755 "$BUILD/skysbx-node/skysbx-node" "$ROOT/skysbx-node"
+    ok "node binary installed"
+fi
 
 # ────────────────────────────── certificate ───────────────────────────────
 
