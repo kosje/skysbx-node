@@ -42,8 +42,8 @@ Actions (default: install)
                     no-argument --upgrade away.
   --purge           --uninstall, and delete everything else this installer
                     created: the environment file, the certificate, the build
-                    cache, the Let's Encrypt account for this node's domain,
-                    and Docker if this script was the one that installed it.
+                    cache, the Go toolchain, and the Let's Encrypt account for
+                    this node's domain.
 
 Install options
   --panel <url>     Panel base URL, e.g. https://panel.example.com
@@ -131,15 +131,17 @@ if [ "$ACTION" = uninstall ] || [ "$ACTION" = purge ]; then
             certbot delete --cert-name "$PURGE_DOMAIN" --non-interactive >/dev/null 2>&1 \
                 && ok "certificate for $PURGE_DOMAIN deleted" || true
         fi
-        # Only what this script pulled, and only if nothing is using it.
-        if command -v docker >/dev/null 2>&1; then
-            docker image rm golang:1.26.5 >/dev/null 2>&1 \
-                && ok "build image removed" || true
+        # The toolchain and its caches are shared when a panel lives on this
+        # host too, so they go only if nothing else is using them. Rebuildable
+        # either way.
+        if ! systemctl is-enabled --quiet skysbx-panel 2>/dev/null; then
+            rm -rf "$ROOT/toolchain" "$ROOT/go-mod-cache" "$ROOT/go-build-cache"
         fi
-        # Docker goes only if this script was the one that installed it. A host
-        # that already ran Docker is running something in it.
+        # Only ever true on a host set up by an older version of this script,
+        # which installed Docker to build in. Nothing installs it any more, but
+        # leaving a daemon behind that we put there would be rude.
         if [ -f "$ROOT/.docker-installed-by-skysbx" ] && command -v docker >/dev/null 2>&1; then
-            say "removing docker (this script installed it)"
+            say "removing docker (an older version of this script installed it)"
             systemctl disable --now docker docker.socket containerd >/dev/null 2>&1 || true
             apt-get purge -y -qq docker-ce docker-ce-cli containerd.io \
                 docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1 || true
@@ -268,13 +270,47 @@ fi
 
 find "$BUILD" -type f -name '*.sh' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
-if ! command -v docker >/dev/null; then
-    say "installing docker (used only to build; nothing runs in it)"
-    curl -fsSL https://get.docker.com | sh >/dev/null
-    # Remembered so --purge can remove Docker again without guessing. A host
-    # that already had it is running something in it.
-    touch "$ROOT/.docker-installed-by-skysbx"
-fi
+# ────────────────────────────── go toolchain ──────────────────────────────
+#
+# Go is needed to build and for nothing else. This used to install Docker for
+# it: a package repository, a daemon and a ~350MB image, to run one compiler
+# once. The official tarball is 64MB, leaves nothing running, and unpacks
+# inside $ROOT where --purge already looks.
+#
+# 1.26.x is not a preference: sing-box reaches an unexported http2 field
+# through go:linkname and 1.27 refuses to link it. The panel pins the same
+# version, so a host running both downloads one toolchain instead of two.
+GO_VERSION=1.26.5
+GO_SHA256_amd64=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
+GO_SHA256_arm64=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
+
+ensure_go() {
+    GO="$ROOT/toolchain/go/bin/go"
+    if [ -x "$GO" ] && "$GO" version 2>/dev/null | grep -q "go$GO_VERSION "; then
+        ok "go $GO_VERSION already unpacked"
+        return
+    fi
+    case $(uname -m) in
+        x86_64|amd64)  go_arch=amd64; go_sha=$GO_SHA256_amd64 ;;
+        aarch64|arm64) go_arch=arm64; go_sha=$GO_SHA256_arm64 ;;
+        *) die "unsupported architecture: $(uname -m)" ;;
+    esac
+    say "fetching go $GO_VERSION ($go_arch)"
+    mkdir -p "$ROOT/toolchain"
+    go_tgz="$ROOT/toolchain/go.tar.gz"
+    curl -fsSL -o "$go_tgz" "https://go.dev/dl/go$GO_VERSION.linux-$go_arch.tar.gz" \
+        || die "could not download the go toolchain"
+    # A tarball unpacked as root is not something to wave through unverified.
+    printf '%s  %s\n' "$go_sha" "$go_tgz" | sha256sum -c - >/dev/null 2>&1 \
+        || die "the go tarball failed its checksum — refusing to unpack it"
+    rm -rf "$ROOT/toolchain/go"
+    tar -C "$ROOT/toolchain" -xzf "$go_tgz"
+    rm -f "$go_tgz"
+    [ -x "$GO" ] || die "the go toolchain did not unpack as expected"
+    ok "go $GO_VERSION ready"
+}
+
+ensure_go
 
 # Stamped into the binary so `--version` can answer what is running without
 # anyone reading a build log.
@@ -282,17 +318,19 @@ VER=$(git -C "$BUILD/skysbx-node" rev-parse --short HEAD 2>/dev/null || echo unk
 
 say "building"
 # The build tags are not optional: without them the binary compiles but exits at
-# startup on "clash api is not included in this build". Go must be 1.26.x —
-# 1.27 fails to link, because sing-box reaches an unexported http2 field through
-# go:linkname.
-docker run --rm -v "$BUILD:/src" -w /src/skysbx-node \
-    -e GOFLAGS=-buildvcs=false -e CGO_ENABLED=0 -e GOOS=linux \
-    golang:1.26.5 \
-    go build -trimpath \
+# startup on "clash api is not included in this build".
+#
+# GOTOOLCHAIN=local is what makes the version pin real: without it Go reads the
+# `go` line in a go.mod and will silently fetch and use a newer toolchain —
+# here that would be the 1.27 this build cannot be linked with.
+( cd "$BUILD/skysbx-node" && env \
+    GOTOOLCHAIN=local GOFLAGS=-buildvcs=false CGO_ENABLED=0 GOOS=linux \
+    GOMODCACHE="$ROOT/go-mod-cache" GOCACHE="$ROOT/go-build-cache" \
+    "$GO" build -trimpath \
         -tags 'with_clash_api,with_v2ray_api,with_utls,with_acme,with_quic' \
         -ldflags "-s -w -X main.version=$VER \
                   -X github.com/sagernet/sing-box/constant.Version=1.14.0" \
-        -o /src/skysbx-node/skysbx-node ./cmd/node
+        -o skysbx-node ./cmd/node )
 install -m 0755 "$BUILD/skysbx-node/skysbx-node" "$ROOT/skysbx-node"
 ok "node binary installed"
 

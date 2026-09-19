@@ -52,7 +52,7 @@ wget -qO- $N | sh -s -- --panel https://panel.example.com --token <token>
 wget -qO- $N | sh -s -- --version      # 节点版本 + 内嵌的 sing-box 版本
 wget -qO- $N | sh -s -- --upgrade      # 重新构建并重启，含 sing-box 核心升级
 wget -qO- $N | sh -s -- --uninstall    # 卸载服务，保留证书和 node.env
-wget -qO- $N | sh -s -- --purge        # 连证书、构建缓存、脚本装的 Docker 一起清掉
+wget -qO- $N | sh -s -- --purge        # 连证书、构建缓存和 Go 工具链一起清掉
 ```
 
 `--upgrade` 不需要任何参数：面板地址和 token 从 `/opt/skysbx/node.env` 读回来。
