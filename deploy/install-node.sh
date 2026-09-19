@@ -298,11 +298,18 @@ ensure_go() {
     say "fetching go $GO_VERSION ($go_arch)"
     mkdir -p "$ROOT/toolchain"
     go_tgz="$ROOT/toolchain/go.tar.gz"
-    curl -fsSL -o "$go_tgz" "https://go.dev/dl/go$GO_VERSION.linux-$go_arch.tar.gz" \
-        || die "could not download the go toolchain"
+    rm -f "$go_tgz"
+    if ! curl -fsSL -o "$go_tgz" "https://go.dev/dl/go$GO_VERSION.linux-$go_arch.tar.gz"; then
+        rm -f "$go_tgz"
+        die "could not download the go toolchain"
+    fi
     # A tarball unpacked as root is not something to wave through unverified.
-    printf '%s  %s\n' "$go_sha" "$go_tgz" | sha256sum -c - >/dev/null 2>&1 \
-        || die "the go tarball failed its checksum — refusing to unpack it"
+    # The rejected bytes go with it: 64MB of unexplained file left in $ROOT by
+    # a failed install is how this becomes a mystery to whoever looks next.
+    if ! printf '%s  %s\n' "$go_sha" "$go_tgz" | sha256sum -c - >/dev/null 2>&1; then
+        rm -f "$go_tgz"
+        die "the go tarball failed its checksum — refusing to unpack it"
+    fi
     rm -rf "$ROOT/toolchain/go"
     tar -C "$ROOT/toolchain" -xzf "$go_tgz"
     rm -f "$go_tgz"
