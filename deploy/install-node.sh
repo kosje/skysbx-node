@@ -43,7 +43,7 @@ usage() {
 
 动作（默认是安装）
   --version         查看已安装的版本，包括内嵌的 sing-box 版本。
-  --upgrade         取得新版并重启。面板地址和 token 会从 ${ROOT}/node.env
+  --upgrade         取得新版并重启。面板地址和接入令牌会从 ${ROOT}/node.env
                     读回来，所以不需要任何参数。升级 sing-box 核心也是走这条：
                     核心是链接进节点二进制的，重新构建就是升级。
   --uninstall       停止并移除服务和二进制。保留证书和 ${ROOT}/node.env，
@@ -54,7 +54,7 @@ usage() {
 
 安装选项
   --panel <地址>    面板地址，例如 https://panel.example.com
-  --token <token>   接入 token，在面板里添加该节点时只显示一次。
+  --token <token>   接入令牌，在面板里添加该节点时只显示一次。
 
   --domain <域名>   这个节点自己的域名。只有 AnyTLS 需要它 —— Reality 和
                     Shadowsocks 不用证书也能认证 —— 所以是可选的。必须是
@@ -187,7 +187,7 @@ if [ "$ACTION" = upgrade ]; then
     # shellcheck disable=SC1090
     PANEL=${PANEL:-$(sed -n 's/^SKYSBX_PANEL=//p' "$ROOT/node.env")}
     TOKEN=${TOKEN:-$(sed -n 's/^SKYSBX_TOKEN=//p' "$ROOT/node.env")}
-    [ -n "$PANEL" ] && [ -n "$TOKEN" ] || die "无法从 $ROOT/node.env 读回面板地址和 token"
+    [ -n "$PANEL" ] && [ -n "$TOKEN" ] || die "无法从 $ROOT/node.env 读回面板地址和接入令牌"
     # certbot renews on its own timer; an upgrade has no business reissuing.
     SKIP_CERT=1
     say "正在升级 —— 面板 $PANEL"
@@ -208,7 +208,7 @@ ask() { # ask <var> <prompt>
 if [ "$ACTION" != upgrade ]; then
     say "节点配置"
     ask PANEL "面板地址（如 https://panel.example.com）"
-    ask TOKEN "接入 token"
+    ask TOKEN "接入令牌"
     if [ -z "$DOMAIN" ] && [ -t 0 ]; then
         printf '  这个节点自己的域名（留空则不启用 AnyTLS）：'
         read -r DOMAIN
