@@ -164,6 +164,12 @@ if [ "$ACTION" = uninstall ] || [ "$ACTION" = purge ]; then
         fi
     fi
 
+    # The shortcut manages both halves, so it goes only when the other one is
+    # not still relying on it.
+    if [ ! -x "$ROOT/skysbx-panel" ]; then
+        rm -f /usr/local/bin/skysbx
+    fi
+
     # Shared with the panel when both are on one host, so it goes only if this
     # was the last thing in it.
     rmdir "$ROOT/build" 2>/dev/null || true
@@ -510,6 +516,23 @@ PrivateTmp=yes
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# The `skysbx` command, for maintaining whatever is on this host without having
+# to remember a raw.githubusercontent URL. It is kept in the panel repository
+# because it manages both halves and belongs to neither; a node-only host still
+# wants it. Best effort: a host that could not fetch one convenience script
+# still has a working node, and the installer below is unaffected either way.
+if [ ! -x /usr/local/bin/skysbx ]; then
+    if curl -fsSL --max-time 30 -o /tmp/skysbx.$$ \
+            "https://raw.githubusercontent.com/${GH_OWNER}/skysbx-panel/main/skysbx.sh" \
+       && [ -s /tmp/skysbx.$$ ]; then
+        install -m 0755 /tmp/skysbx.$$ /usr/local/bin/skysbx
+        ok "skysbx command installed"
+    else
+        warn "could not install the 'skysbx' shortcut; the node is unaffected"
+    fi
+    rm -f /tmp/skysbx.$$
+fi
 
 systemctl daemon-reload
 systemctl enable -q skysbx-node
