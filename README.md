@@ -76,6 +76,18 @@ skysbx-node -panel https://panel.example.com -token <token>
 SKYSBX_PANEL=... SKYSBX_TOKEN=... skysbx-node
 ```
 
+### 装的是编好的二进制，不是现编
+
+安装器先取已发布的构建；取不到才编译。节点这一半的编译尤其贵——sing-box 带全部 build
+tag，在 1 核机器上实测 3 分 12 秒，还要先下 64MB 的 Go 工具链。
+
+**回落是设计的一部分**：没有对应架构的发布、取不到 GitHub、或者加了 `--from-source`，
+都会走编译，它永远可用。`SKYSBX_VERSION=v0.1.0` 可以钉住版本。**校验和对不上会停下来**，
+不会静默回落。
+
+一个后果值得知道：sing-box 核心是编进二进制的，所以「升级核心」就等于装一个新版本的
+节点，没有第二个版本要单独管。
+
 ## 构建
 
 ```bash
