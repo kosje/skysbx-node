@@ -31,47 +31,43 @@ LAUNCHER_SRC=${SKYSBX_LAUNCHER_SRC:-}
 
 RED=$'\e[31m'; GRN=$'\e[32m'; YLW=$'\e[33m'; BLD=$'\e[1m'; RST=$'\e[0m'
 say()  { printf '%s==>%s %s\n' "$BLD" "$RST" "$*"; }
-ok()   { printf '%s  ok%s %s\n' "$GRN" "$RST" "$*"; }
-warn() { printf '%s warn%s %s\n' "$YLW" "$RST" "$*"; }
-die()  { printf '%s fail%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
+ok()   { printf '%s 完成%s %s\n' "$GRN" "$RST" "$*"; }
+warn() { printf '%s 警告%s %s\n' "$YLW" "$RST" "$*"; }
+die()  { printf '%s 错误%s %s\n' "$RED" "$RST" "$*" >&2; exit 1; }
 
 ACTION=install
 
 usage() {
     cat <<EOF
-Usage: sudo ./install-node.sh [--panel <url> --token <token>] [options]
+用法：sudo ./install-node.sh [--panel <地址> --token <token>] [选项]
 
-Actions (default: install)
-  --version         What is installed, including the sing-box it embeds.
-  --upgrade         Rebuild from the current sources and restart. Reads the
-                    panel URL and token back from ${ROOT}/node.env, so it needs
-                    no arguments. This is also how the sing-box core is updated:
-                    the node links it, so a rebuild is the upgrade.
-  --uninstall       Stop and remove the service and the binary. Keeps the
-                    certificate and ${ROOT}/node.env, so a reinstall is a
-                    no-argument --upgrade away.
-  --purge           --uninstall, and delete everything else this installer
-                    created: the environment file, the certificate, the build
-                    cache, the Go toolchain, and the Let's Encrypt account for
-                    this node's domain.
+动作（默认是安装）
+  --version         查看已安装的版本，包括内嵌的 sing-box 版本。
+  --upgrade         取得新版并重启。面板地址和 token 会从 ${ROOT}/node.env
+                    读回来，所以不需要任何参数。升级 sing-box 核心也是走这条：
+                    核心是链接进节点二进制的，重新构建就是升级。
+  --uninstall       停止并移除服务和二进制。保留证书和 ${ROOT}/node.env，
+                    所以装回来只需要一条不带参数的 --upgrade。
+  --purge           在 --uninstall 的基础上，删除本安装器创建的其余所有东西：
+                    环境文件、证书、构建缓存、Go 工具链，以及这个节点域名
+                    对应的 Let's Encrypt 账户。
 
-Install options
-  --panel <url>     Panel base URL, e.g. https://panel.example.com
-  --token <token>   Join token, shown once when the node was added in the panel.
+安装选项
+  --panel <地址>    面板地址，例如 https://panel.example.com
+  --token <token>   接入 token，在面板里添加该节点时只显示一次。
 
-  --domain <fqdn>   This node's own domain. Only AnyTLS needs it — Reality and
-                    Shadowsocks authenticate without a certificate — so it is
-                    optional. Must be DNS-only: none of the three protocols is
-                    HTTP, and a CDN in front breaks all of them.
-  --email <addr>    Let's Encrypt contact address (default admin@<domain>).
-  --cf-token <tok>  Cloudflare API token, to validate over DNS-01 when port 80
-                    is not reachable.
-  --no-cert         Skip certificate issuance.
+  --domain <域名>   这个节点自己的域名。只有 AnyTLS 需要它 —— Reality 和
+                    Shadowsocks 不用证书也能认证 —— 所以是可选的。必须是
+                    DNS only（灰云）：三个协议都不是 HTTP，前面套 CDN 会让
+                    它们全部失效。
+  --email <邮箱>    Let's Encrypt 联系邮箱（默认 admin@<域名>）。
+  --cf-token <tok>  Cloudflare API token，80 端口不可达时用 DNS-01 验证。
+  --no-cert         跳过证书签发。
 
-  --src <dir>       Build from a checkout on disk instead of cloning.
-  --from-source     Build from source instead of downloading a published binary.
-  --fork <dir>      Path to the patched sing-box; defaults to a sibling clone.
-  -h, --help        This text.
+  --src <目录>      用本地已有的检出编译，不再克隆。
+  --from-source     从源码编译，不下载已发布的二进制。
+  --fork <目录>     打过补丁的 sing-box 路径；默认使用同级的克隆。
+  -h, --help        显示本说明。
 EOF
 }
 
@@ -91,7 +87,7 @@ while [ $# -gt 0 ]; do
         --from-source) FROM_SOURCE=1; shift ;;
         --fork)      FORK_DIR=$2; shift 2 ;;
         -h|--help)   usage; exit 0 ;;
-        *) die "unknown option: $1 (try --help)" ;;
+        *) die "无法识别的参数：$1（试试 --help）" ;;
     esac
 done
 
@@ -100,33 +96,33 @@ done
 if [ "$ACTION" = version ]; then
     if [ -x "$ROOT/skysbx-node" ]; then
         "$ROOT/skysbx-node" -version
-        printf 'installed  %s\n' "$(stat -c %y "$ROOT/skysbx-node" 2>/dev/null | cut -d. -f1)"
+        printf '安装于    %s\n' "$(stat -c %y "$ROOT/skysbx-node" 2>/dev/null | cut -d. -f1)"
         systemctl is-active --quiet skysbx-node \
-            && printf 'service    running\n' || printf 'service    not running\n'
+            && printf '服务      运行中\n' || printf '服务      已停止\n'
     else
-        printf 'skysbx-node is not installed at %s\n' "$ROOT"
+        printf '%s 下没有安装 skysbx-node\n' "$ROOT"
     fi
     exit 0
 fi
 
 if [ "$ACTION" = uninstall ] || [ "$ACTION" = purge ]; then
-    [ "$(id -u)" = 0 ] || die "run as root"
+    [ "$(id -u)" = 0 ] || die "请用 root 运行"
 
-    say "removing the service"
+    say "正在移除服务"
     systemctl disable --now skysbx-node >/dev/null 2>&1 || true
     rm -f /etc/systemd/system/skysbx-node.service
     systemctl daemon-reload 2>/dev/null || true
     systemctl reset-failed 2>/dev/null || true
-    ok "skysbx-node stopped and removed"
+    ok "skysbx-node 已停止并移除"
 
     rm -f "$ROOT/skysbx-node"
     # The build tree is this installer's scratch space, not data: it is a fresh
     # clone on every run.
     rm -rf "$ROOT/build/skysbx-node" "$ROOT/build/skysbx-core"
-    ok "binary and build cache removed"
+    ok "二进制和构建缓存已删除"
 
     if [ "$ACTION" = purge ]; then
-        say "purging"
+        say "正在清除"
         # Read the domain back before deleting the hook that names it.
         #
         # Guarded, because there may be no hook: with pipefail a failing sed
@@ -141,7 +137,7 @@ if [ "$ACTION" = uninstall ] || [ "$ACTION" = purge ]; then
         rm -f "$ROOT/node.env" "$ROOT/cert.pem" "$ROOT/key.pem" "$ROOT/certbot-deploy.sh"
         if [ -n "$PURGE_DOMAIN" ] && command -v certbot >/dev/null 2>&1; then
             certbot delete --cert-name "$PURGE_DOMAIN" --non-interactive >/dev/null 2>&1 \
-                && ok "certificate for $PURGE_DOMAIN deleted" || true
+                && ok "$PURGE_DOMAIN 的证书已删除" || true
         fi
         # The toolchain and its caches are shared when a panel lives on this
         # host too, so they go only if nothing else is using them. Rebuildable
@@ -153,14 +149,14 @@ if [ "$ACTION" = uninstall ] || [ "$ACTION" = purge ]; then
         # which installed Docker to build in. Nothing installs it any more, but
         # leaving a daemon behind that we put there would be rude.
         if [ -f "$ROOT/.docker-installed-by-skysbx" ] && command -v docker >/dev/null 2>&1; then
-            say "removing docker (an older version of this script installed it)"
+            say "正在卸载 docker（是本脚本的旧版本装的）"
             systemctl disable --now docker docker.socket containerd >/dev/null 2>&1 || true
             apt-get purge -y -qq docker-ce docker-ce-cli containerd.io \
                 docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1 || true
             apt-get autoremove -y -qq >/dev/null 2>&1 || true
             rm -rf /var/lib/docker /var/lib/containerd /etc/docker
             rm -f "$ROOT/.docker-installed-by-skysbx"
-            ok "docker removed"
+            ok "docker 已卸载"
         fi
     fi
 
@@ -174,47 +170,47 @@ if [ "$ACTION" = uninstall ] || [ "$ACTION" = purge ]; then
     # was the last thing in it.
     rmdir "$ROOT/build" 2>/dev/null || true
     if rmdir "$ROOT" 2>/dev/null; then
-        ok "$ROOT removed"
+        ok "$ROOT 已删除"
     else
-        warn "$ROOT kept — it still holds files (the panel's, or your own):"
+        warn "$ROOT 保留 —— 里面还有别的文件（面板的，或你自己的）："
         (ls -A "$ROOT" 2>/dev/null || true) | sed 's/^/       /'
     fi
 
-    printf '\n%sskysbx node removed.%s\n' "$GRN" "$RST"
+    printf '\n%sskysbx 节点已移除。%s\n' "$GRN" "$RST"
     [ "$ACTION" = uninstall ] && printf \
-        'The certificate and %s/node.env were kept; --purge removes those too.\n' "$ROOT"
+        '证书和 %s/node.env 保留了下来；--purge 会把它们也删掉。\n' "$ROOT"
     exit 0
 fi
 
 if [ "$ACTION" = upgrade ]; then
-    [ -f "$ROOT/node.env" ] || die "nothing installed at $ROOT (run without --upgrade first)"
+    [ -f "$ROOT/node.env" ] || die "$ROOT 下没有已安装的节点（请先不带 --upgrade 安装一次）"
     # shellcheck disable=SC1090
     PANEL=${PANEL:-$(sed -n 's/^SKYSBX_PANEL=//p' "$ROOT/node.env")}
     TOKEN=${TOKEN:-$(sed -n 's/^SKYSBX_TOKEN=//p' "$ROOT/node.env")}
-    [ -n "$PANEL" ] && [ -n "$TOKEN" ] || die "cannot read the panel URL and token from $ROOT/node.env"
+    [ -n "$PANEL" ] && [ -n "$TOKEN" ] || die "无法从 $ROOT/node.env 读回面板地址和 token"
     # certbot renews on its own timer; an upgrade has no business reissuing.
     SKIP_CERT=1
-    say "upgrading — panel $PANEL"
+    say "正在升级 —— 面板 $PANEL"
 fi
 
 ask() { # ask <var> <prompt>
     local __var=$1 __prompt=$2 __reply=""
     [ -n "${!__var}" ] && return 0
-    [ -t 0 ] || die "$__prompt is required (no terminal to ask on)"
+    [ -t 0 ] || die "必须提供$__prompt（当前没有终端可以询问）"
     printf '  %s: ' "$__prompt"
     read -r __reply
     printf -v "$__var" '%s' "$__reply"
-    [ -n "${!__var}" ] || die "$__prompt is required"
+    [ -n "${!__var}" ] || die "必须提供$__prompt"
 }
 
 # An upgrade already knows all of this: it read the panel URL and token out of
 # node.env, and the certificate is certbot's business, not this run's.
 if [ "$ACTION" != upgrade ]; then
-    say "node configuration"
-    ask PANEL "Panel URL (https://panel.example.com)"
-    ask TOKEN "Join token"
+    say "节点配置"
+    ask PANEL "面板地址（如 https://panel.example.com）"
+    ask TOKEN "接入 token"
     if [ -z "$DOMAIN" ] && [ -t 0 ]; then
-        printf "  This node's domain (blank to skip AnyTLS): "
+        printf '  这个节点自己的域名（留空则不启用 AnyTLS）：'
         read -r DOMAIN
     fi
     [ -n "$DOMAIN" ] && [ -z "$EMAIL" ] && EMAIL="admin@$DOMAIN"
@@ -222,8 +218,8 @@ fi
 
 # ─────────────────────────────── preflight ────────────────────────────────
 
-say "preflight"
-[ "$(id -u)" = 0 ] || die "run as root"
+say "环境检查"
+[ "$(id -u)" = 0 ] || die "请用 root 运行"
 
 command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl; }
 for p in git dig; do
@@ -234,20 +230,20 @@ if [ -n "$DOMAIN" ]; then
     PUBLIC_IP=$(curl -fsS --max-time 10 https://api.ipify.org || echo "")
     RESOLVED=$( (dig +short "$DOMAIN" A @1.1.1.1 || true) | tail -1)
     if [ -z "$RESOLVED" ]; then
-        warn "$DOMAIN has no A record; AnyTLS will not get a certificate"
+        warn "$DOMAIN 没有 A 记录；AnyTLS 拿不到证书"
     elif [ -n "$PUBLIC_IP" ] && [ "$RESOLVED" != "$PUBLIC_IP" ]; then
-        warn "$DOMAIN resolves to $RESOLVED but this host is $PUBLIC_IP"
-        warn "if the record is proxied, switch it to DNS only: none of the three"
-        warn "protocols is HTTP, and a CDN in front breaks all of them"
+        warn "$DOMAIN 解析到 $RESOLVED，而本机是 $PUBLIC_IP"
+        warn "如果这条记录开了代理，请改成 DNS only（灰云）：三个协议都不是"
+        warn "HTTP，前面套一层 CDN 会让它们全部失效"
     else
-        ok "$DOMAIN -> $RESOLVED (this host)"
+        ok "$DOMAIN -> $RESOLVED（就是本机）"
     fi
 fi
 
 # The panel has to be reachable before anything is built.
 STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${PANEL%/}/login" || echo 000)
-[ "$STATUS" = 000 ] && die "cannot reach $PANEL"
-ok "panel reachable"
+[ "$STATUS" = 000 ] && die "连不上面板 $PANEL"
+ok "面板可达"
 
 # ──────────────────────────────── build ───────────────────────────────────
 
@@ -271,12 +267,12 @@ fetch() { # fetch <repo> <dest> <ref>
         git -c "http.extraHeader=Authorization: Basic $(printf 'x-access-token:%s' \
             "$GH_TOKEN" | base64 -w0)" \
             clone -q --branch "$ref" --depth 1 "$url" "$dest" \
-            || die "cannot clone ${GH_OWNER}/${repo}@${ref}
-  The branch may not exist, or GITHUB_TOKEN may not grant access to this repo."
+            || die "无法克隆 ${GH_OWNER}/${repo}@${ref}
+  该分支可能不存在，或者 GITHUB_TOKEN 没有访问这个仓库的权限。"
     else
         git clone -q --branch "$ref" --depth 1 "$url" "$dest" \
-            || die "cannot clone ${GH_OWNER}/${repo}@${ref}
-  The branch may not exist; if the repository is private, set GITHUB_TOKEN."
+            || die "无法克隆 ${GH_OWNER}/${repo}@${ref}
+  该分支可能不存在；如果是私有仓库，请设置 GITHUB_TOKEN。"
     fi
     ok "${repo}@$(git -C "$dest" rev-parse --short HEAD)"
 }
@@ -313,7 +309,7 @@ try_release() {
 
     local tmp; tmp=$(mktemp -d)
     local asset="skysbx-node-linux-$rel_arch"
-    say "looking for a published build"
+    say "正在查找已发布的构建"
     if ! curl -fsSL --max-time 180 -o "$tmp/$asset" "$from/$asset" \
       || ! curl -fsSL --max-time 30 -o "$tmp/SHA256SUMS" "$from/SHA256SUMS"; then
         rm -rf "$tmp"
@@ -324,12 +320,12 @@ try_release() {
     # release that does not match its own checksums is worth looking at.
     if ! ( cd "$tmp" && grep " $asset\$" SHA256SUMS | sha256sum -c - >/dev/null 2>&1 ); then
         rm -rf "$tmp"
-        die "the published node binary did not match its checksum.
-  Refusing to install it. Re-run with --from-source to build instead."
+        die "已发布的节点二进制与校验和不符。
+  拒绝安装。可以加 --from-source 改为从源码编译。"
     fi
     install -m 0755 "$tmp/$asset" "$ROOT/skysbx-node"
     rm -rf "$tmp"
-    ok "installed a published build ($rel_arch)"
+    ok "已安装发布版二进制（$rel_arch）"
     return 0
 }
 
@@ -337,20 +333,20 @@ HAVE_BINARY=0
 try_release && HAVE_BINARY=1
 
 if [ "$HAVE_BINARY" = 0 ]; then
-    say "sources"
+    say "准备源码"
     # LAUNCHER_SRC is the clone install.sh already made to find this script. It
     # is reused rather than re-cloned, but it is deliberately not --src: only an
     # operator passing --src means "do not look for a published binary".
     if [ -n "$SRC_DIR" ]; then
-        rm -rf "$BUILD/skysbx-node"; cp -a "$SRC_DIR" "$BUILD/skysbx-node"; ok "using $SRC_DIR"
+        rm -rf "$BUILD/skysbx-node"; cp -a "$SRC_DIR" "$BUILD/skysbx-node"; ok "使用 $SRC_DIR"
     elif [ -n "$LAUNCHER_SRC" ] && [ -d "$LAUNCHER_SRC" ]; then
         rm -rf "$BUILD/skysbx-node"; cp -a "$LAUNCHER_SRC" "$BUILD/skysbx-node"
-        ok "reusing the clone the launcher made"
+        ok "复用启动器已经克隆好的源码"
     else
         fetch skysbx-node "$BUILD/skysbx-node" "$REF"
     fi
     if [ -n "$FORK_DIR" ]; then
-        rm -rf "$BUILD/skysbx-core"; cp -a "$FORK_DIR" "$BUILD/skysbx-core"; ok "using $FORK_DIR"
+        rm -rf "$BUILD/skysbx-core"; cp -a "$FORK_DIR" "$BUILD/skysbx-core"; ok "使用 $FORK_DIR"
     else
         fetch skysbx-core "$BUILD/skysbx-core" "$FORK_REF"
     fi
@@ -375,34 +371,34 @@ GO_SHA256_arm64=fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49
 ensure_go() {
     GO="$ROOT/toolchain/go/bin/go"
     if [ -x "$GO" ] && "$GO" version 2>/dev/null | grep -q "go$GO_VERSION "; then
-        ok "go $GO_VERSION already unpacked"
+        ok "go $GO_VERSION 已经解包过了"
         return
     fi
     case $(uname -m) in
         x86_64|amd64)  go_arch=amd64; go_sha=$GO_SHA256_amd64 ;;
         aarch64|arm64) go_arch=arm64; go_sha=$GO_SHA256_arm64 ;;
-        *) die "unsupported architecture: $(uname -m)" ;;
+        *) die "不支持的架构：$(uname -m)" ;;
     esac
-    say "fetching go $GO_VERSION ($go_arch)"
+    say "正在下载 go $GO_VERSION（$go_arch）"
     mkdir -p "$ROOT/toolchain"
     go_tgz="$ROOT/toolchain/go.tar.gz"
     rm -f "$go_tgz"
     if ! curl -fsSL -o "$go_tgz" "https://go.dev/dl/go$GO_VERSION.linux-$go_arch.tar.gz"; then
         rm -f "$go_tgz"
-        die "could not download the go toolchain"
+        die "无法下载 go 工具链"
     fi
     # A tarball unpacked as root is not something to wave through unverified.
     # The rejected bytes go with it: 64MB of unexplained file left in $ROOT by
     # a failed install is how this becomes a mystery to whoever looks next.
     if ! printf '%s  %s\n' "$go_sha" "$go_tgz" | sha256sum -c - >/dev/null 2>&1; then
         rm -f "$go_tgz"
-        die "the go tarball failed its checksum — refusing to unpack it"
+        die "go 压缩包校验和不符 —— 拒绝解包"
     fi
     rm -rf "$ROOT/toolchain/go"
     tar -C "$ROOT/toolchain" -xzf "$go_tgz"
     rm -f "$go_tgz"
-    [ -x "$GO" ] || die "the go toolchain did not unpack as expected"
-    ok "go $GO_VERSION ready"
+    [ -x "$GO" ] || die "go 工具链解包结果不符合预期"
+    ok "go $GO_VERSION 就绪"
 }
 
 if [ "$HAVE_BINARY" = 0 ]; then
@@ -412,7 +408,7 @@ if [ "$HAVE_BINARY" = 0 ]; then
     # anyone reading a build log.
     VER=$(git -C "$BUILD/skysbx-node" rev-parse --short HEAD 2>/dev/null || echo unknown)
 
-    say "building"
+    say "正在编译"
     # The build tags are not optional: without them the binary compiles but exits at
     # startup on "clash api is not included in this build".
     #
@@ -428,7 +424,7 @@ if [ "$HAVE_BINARY" = 0 ]; then
                       -X github.com/sagernet/sing-box/constant.Version=1.14.0" \
             -o skysbx-node ./cmd/node )
     install -m 0755 "$BUILD/skysbx-node/skysbx-node" "$ROOT/skysbx-node"
-    ok "node binary installed"
+    ok "节点二进制已安装"
 fi
 
 # ────────────────────────────── certificate ───────────────────────────────
@@ -437,7 +433,7 @@ fi
 # Shadowsocks 2022 has no TLS layer, so a node without a certificate still
 # serves two of the three protocols.
 if [ -n "$DOMAIN" ] && [ "$SKIP_CERT" = 0 ]; then
-    say "certificate for $DOMAIN"
+    say "为 $DOMAIN 申请证书"
     command -v certbot >/dev/null || apt-get install -y -qq certbot
 
     cat > "$ROOT/certbot-deploy.sh" <<EOF
@@ -464,22 +460,22 @@ EOF
         certbot $ARGS --dns-cloudflare \
             --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
             --dns-cloudflare-propagation-seconds 30 \
-            || warn "certbot failed; Reality and Shadowsocks still work"
+            || warn "certbot 失败；Reality 和 Shadowsocks 仍然可用"
     else
         # shellcheck disable=SC2086
         certbot $ARGS --standalone \
-            || warn "certbot failed; Reality and Shadowsocks still work"
+            || warn "certbot 失败；Reality 和 Shadowsocks 仍然可用"
     fi
     # --keep-until-expiring makes a re-run a no-op, and a no-op does not fire
     # the deploy hook, so copy here too.
     "$ROOT/certbot-deploy.sh" || true
     systemctl enable -q --now certbot.timer 2>/dev/null || true
-    [ -f "$ROOT/cert.pem" ] && ok "certificate at $ROOT/cert.pem"
+    [ -f "$ROOT/cert.pem" ] && ok "证书已放在 $ROOT/cert.pem"
 fi
 
 # ─────────────────────────────── service ──────────────────────────────────
 
-say "service"
+say "配置服务"
 # The token goes in an environment file rather than the command line, which is
 # readable by every process on the host.
 cat > "$ROOT/node.env" <<EOF
@@ -529,9 +525,9 @@ if curl -fsSL --max-time 30 -o /tmp/skysbx.$$ \
         "https://raw.githubusercontent.com/${GH_OWNER}/skysbx-panel/main/skysbx.sh" \
    && [ -s /tmp/skysbx.$$ ]; then
     install -m 0755 /tmp/skysbx.$$ /usr/local/bin/skysbx
-    ok "skysbx command installed"
+    ok "skysbx 命令已安装"
 else
-    warn "could not install the 'skysbx' shortcut; the node is unaffected"
+    warn "无法安装 skysbx 快捷命令；不影响节点本身"
 fi
 rm -f /tmp/skysbx.$$
 
@@ -543,21 +539,23 @@ systemctl restart skysbx-node
 sleep 5
 
 if systemctl is-active --quiet skysbx-node; then
-    ok "node is running"
+    ok "节点正在运行"
 else
-    warn "node did not start: journalctl -u skysbx-node -n 50"
+    warn "节点没有启动：journalctl -u skysbx-node -n 50"
 fi
 
 cat <<EOF
 
-${GRN}skysbx node
+${GRN}skysbx 节点
 ==========
-Panel     ${PANEL}
-$([ -n "$DOMAIN" ] && echo "Domain    ${DOMAIN}")
-Data      ${ROOT}
+面板    ${PANEL}
+$([ -n "$DOMAIN" ] && echo "域名    ${DOMAIN}")
+数据    ${ROOT}
 
-Logs      journalctl -u skysbx-node -f
+日志    journalctl -u skysbx-node -f
 
-The node dials the panel, so it needs no inbound control port and no route from
-it. Add inbounds in the panel; they take effect within seconds.${RST}
+维护    skysbx（菜单）、skysbx version、skysbx upgrade
+
+节点是主动去连面板的，所以不需要开放任何控制端口，面板也不需要能路由到它。
+在面板里添加入站即可，几秒内生效。${RST}
 EOF
