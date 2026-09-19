@@ -6,6 +6,9 @@ skysbx 的数据面：内嵌 sing-box，由 [`skysbx-panel`](https://github.com/
 **没有配置文件，没有监听的控制端口。** 只需要面板地址和一个 token；服务什么、给谁服务、
 拦什么，全部由面板决定。
 
+安装和维护提示使用简体中文。安装器优先下载经过 SHA256 校验的预编译二进制，只有没有
+匹配的发布版本或明确要求源码构建时才编译，因此低配服务器不需要 Docker 或 Go 环境。
+
 ## 它做什么
 
 启动后主动连面板，然后：
@@ -35,15 +38,27 @@ skysbx 的数据面：内嵌 sing-box，由 [`skysbx-panel`](https://github.com/
 节点还可能替**别的节点**开一个 L4 转发口（面板里的「站内中转」）—— 那只是配置里多一个
 `direct` 入站，纯字节转发，不解密也不认证。节点这边没有任何特殊处理。
 
+配置应用失败时节点会保留上一份可用配置并上报错误；面板会显示「已生效」「确认中」「跑的
+是旧配置」「未生效」或「节点离线」，不会把一次端口冲突变成整台节点无监听。用户变更走
+独立的热更新通道，新增用户不会重启监听器。
+
 ## 安装
 
-先在面板里 **节点 → 新增**，复制那个只显示一次的接入 token，然后在这台服务器上：
+安装器面向 Debian / Ubuntu，需要 root、Bash 和 Git。Git 缺失时，一键安装脚本会尝试通过系统包管理器安装。
+
+先在面板里 **节点 → 新增**，复制那个只显示一次的接入 token，然后在节点服务器上运行：
 
 ```bash
 wget -qO- https://raw.githubusercontent.com/kosje/skysbx-node/main/install.sh | sh
 ```
 
-安装会在 `/usr/local/bin/skysbx` 留一个命令，之后维护这台机器不用再记 URL：
+安装过程使用简体中文交互，并询问面板地址和 token。也可以克隆本仓库后直接运行部署脚本：
+
+```bash
+sudo bash deploy/install-node.sh --panel https://panel.example.com --token <token>
+```
+
+安装会在 `/usr/local/bin/skysbx` 留下统一维护命令；安装或升级节点时会刷新它。之后维护这台机器不用再记 URL：
 
 ```bash
 skysbx            # 菜单：版本 / 升级 / 卸载 / 清除，以及在这台机器上加装面板
@@ -61,16 +76,16 @@ N=https://raw.githubusercontent.com/kosje/skysbx-node/main/install.sh
 
 wget -qO- $N | sh -s -- --panel https://panel.example.com --token <token>
 wget -qO- $N | sh -s -- --version      # 节点版本 + 内嵌的 sing-box 版本
-wget -qO- $N | sh -s -- --upgrade      # 重新构建并重启，含 sing-box 核心升级
+wget -qO- $N | sh -s -- --upgrade      # 升级并重启，优先使用预编译版本，含 sing-box 核心升级
 wget -qO- $N | sh -s -- --uninstall    # 卸载服务，保留证书和 node.env
 wget -qO- $N | sh -s -- --purge        # 连证书、构建缓存和 Go 工具链一起清掉
 ```
 
 `--upgrade` 不需要任何参数：面板地址和 token 从 `/opt/skysbx/node.env` 读回来。
 
-**sing-box 核心怎么升级：** 核心是编进这个二进制里的，所以 `--upgrade` 重新构建一次
-就是升级 —— 它会重新拉 [`skysbx-core`](https://github.com/kosje/skysbx-core) 再编。
-没有单独的核心版本要管，也没有第二个进程要重启。
+**sing-box 核心怎么升级：** 核心是编进这个二进制里的，所以 `--upgrade` 安装新的节点
+发布版就是升级核心。只有没有匹配的发布版，或明确使用 `--from-source` 时，才会重新拉
+[`skysbx-core`](https://github.com/kosje/skysbx-core) 编译。没有单独的核心进程要管理。
 
 `--domain` 是可选的：只有 AnyTLS 需要证书，Reality 用自己的密钥对认证、Shadowsocks
 没有 TLS 层，所以没证书的节点照样服务另外两个协议。给了域名脚本就用 certbot 签
@@ -87,9 +102,9 @@ skysbx-node -panel https://panel.example.com -token <token>
 SKYSBX_PANEL=... SKYSBX_TOKEN=... skysbx-node
 ```
 
-### 装的是编好的二进制，不是现编
+### 预编译发布与低配机器
 
-安装器先取已发布的构建；取不到才编译。节点这一半的编译尤其贵——sing-box 带全部 build
+安装器先取已发布的构建并校验 SHA256；取不到才编译。节点这一半的编译尤其贵——sing-box 带全部 build
 tag，在 1 核机器上实测 3 分 12 秒，还要先下 64MB 的 Go 工具链。
 
 **回落是设计的一部分**：没有对应架构的发布、取不到 GitHub、或者加了 `--from-source`，
@@ -102,7 +117,7 @@ tag，在 1 核机器上实测 3 分 12 秒，还要先下 64MB 的 Go 工具链
 ## 构建
 
 ```bash
-GOTOOLCHAIN=go1.26.5 CGO_ENABLED=0 go build -trimpath \
+GOTOOLCHAIN=local CGO_ENABLED=0 go build -trimpath \
   -tags 'with_clash_api,with_v2ray_api,with_utls,with_acme,with_quic' \
   -ldflags '-s -w -X main.version=$VER -X github.com/sagernet/sing-box/constant.Version=1.14.0' \
   ./cmd/node
